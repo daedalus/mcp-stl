@@ -1,5 +1,4 @@
 import pytest
-from hypothesis import settings, Verbosity
 
 
 @pytest.fixture
