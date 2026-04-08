@@ -533,6 +533,298 @@ def create_mcp_server() -> fastmcp.FastMCP:
 
         return _core.combine_stl(paths, output_path)
 
+    @mcp.tool()
+    def create_gear(
+        output_path: str,
+        module: float = 1.0,
+        teeth: int = 20,
+        thickness: float = 1.0,
+        pressure_angle_deg: float = 20.0,
+        segments_per_tooth: int = 4,
+    ) -> str:
+        """Creates a spur gear mesh (used for timing gears, cam drives, etc.).
+
+        Args:
+            output_path: Output STL file path.
+            module: Gear module — pitch diameter / tooth count (default 1.0).
+            teeth: Number of teeth (default 20, minimum 4).
+            thickness: Face width along Y axis (default 1.0).
+            pressure_angle_deg: Pressure angle in degrees (default 20.0).
+            segments_per_tooth: Polygon segments per tooth (default 4).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If teeth < 4.
+
+        Example:
+            >>> create_gear("gear.stl", module=2.0, teeth=16, thickness=1.5)
+            "gear.stl"
+        """
+        return _core.create_gear(
+            output_path, module, teeth, thickness, pressure_angle_deg, segments_per_tooth
+        )
+
+    @mcp.tool()
+    def create_spring(
+        output_path: str,
+        coil_radius: float = 1.0,
+        wire_radius: float = 0.1,
+        turns: float = 5.0,
+        height: float = 5.0,
+        segments: int = 32,
+        wire_segments: int = 8,
+    ) -> str:
+        """Creates a helical coil spring mesh (used for valve springs, etc.).
+
+        The spring axis is along Y, centred at the origin.
+
+        Args:
+            output_path: Output STL file path.
+            coil_radius: Radius of the coil helix centre line (default 1.0).
+            wire_radius: Radius of the wire cross-section (default 0.1).
+            turns: Number of coil turns (default 5.0).
+            height: Total spring height along Y axis (default 5.0).
+            segments: Path segments per full turn (default 32).
+            wire_segments: Polygon sides on wire cross-section (default 8).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_spring("spring.stl", coil_radius=0.8, wire_radius=0.08, turns=6)
+            "spring.stl"
+        """
+        return _core.create_spring(
+            output_path, coil_radius, wire_radius, turns, height, segments, wire_segments
+        )
+
+    @mcp.tool()
+    def create_connecting_rod(
+        output_path: str,
+        length: float = 6.0,
+        big_end_outer_radius: float = 1.0,
+        big_end_inner_radius: float = 0.6,
+        small_end_outer_radius: float = 0.6,
+        small_end_inner_radius: float = 0.35,
+        beam_width: float = 0.4,
+        beam_height: float = 0.8,
+        segments: int = 32,
+    ) -> str:
+        """Creates a simplified connecting rod mesh.
+
+        The rod is aligned along Y. Big end (crankshaft side) at y = -length/2,
+        small end (piston-pin side) at y = +length/2.
+
+        Args:
+            output_path: Output STL file path.
+            length: Centre-to-centre distance between end bores (default 6.0).
+            big_end_outer_radius: Outer radius of the big end (default 1.0).
+            big_end_inner_radius: Inner bore radius of the big end (default 0.6).
+            small_end_outer_radius: Outer radius of the small end (default 0.6).
+            small_end_inner_radius: Inner bore radius of the small end (default 0.35).
+            beam_width: Width of connecting beam along X (default 0.4).
+            beam_height: Depth of connecting beam along Z (default 0.8).
+            segments: Radial segments for end bores (default 32).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If inner radius >= outer radius for either end.
+
+        Example:
+            >>> create_connecting_rod("rod.stl", length=8.0)
+            "rod.stl"
+        """
+        return _core.create_connecting_rod(
+            output_path,
+            length,
+            big_end_outer_radius,
+            big_end_inner_radius,
+            small_end_outer_radius,
+            small_end_inner_radius,
+            beam_width,
+            beam_height,
+            segments,
+        )
+
+    @mcp.tool()
+    def create_crankshaft(
+        output_path: str,
+        throws: int = 4,
+        main_journal_radius: float = 0.5,
+        rod_journal_radius: float = 0.4,
+        journal_width: float = 0.4,
+        crank_arm_thickness: float = 0.25,
+        stroke: float = 2.0,
+        segments: int = 32,
+    ) -> str:
+        """Creates a simplified crankshaft mesh.
+
+        Main axis along Y. Main journals on the Y axis; crank pins offset
+        radially by stroke/2, evenly distributed around the Y axis.
+
+        Args:
+            output_path: Output STL file path.
+            throws: Number of crank throws / cylinders (default 4).
+            main_journal_radius: Radius of the main bearing journals (default 0.5).
+            rod_journal_radius: Radius of crank pins / rod journals (default 0.4).
+            journal_width: Axial width of each journal (default 0.4).
+            crank_arm_thickness: Axial thickness of crank arm discs (default 0.25).
+            stroke: Piston stroke; pin offset = stroke/2 (default 2.0).
+            segments: Radial segments (default 32).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If throws < 1.
+
+        Example:
+            >>> create_crankshaft("crank.stl", throws=4, stroke=3.0)
+            "crank.stl"
+        """
+        return _core.create_crankshaft(
+            output_path,
+            throws,
+            main_journal_radius,
+            rod_journal_radius,
+            journal_width,
+            crank_arm_thickness,
+            stroke,
+            segments,
+        )
+
+    @mcp.tool()
+    def create_valve(
+        output_path: str,
+        stem_radius: float = 0.15,
+        stem_length: float = 3.0,
+        head_radius: float = 0.6,
+        head_height: float = 0.15,
+        segments: int = 32,
+    ) -> str:
+        """Creates a poppet valve mesh (intake or exhaust valve).
+
+        Stem tip at y = +stem_length/2; head face at y = -(stem_length/2 + head_height).
+
+        Args:
+            output_path: Output STL file path.
+            stem_radius: Radius of the valve stem (default 0.15).
+            stem_length: Length of the cylindrical stem (default 3.0).
+            head_radius: Outer radius of the valve head disc (default 0.6).
+            head_height: Axial thickness of the valve head (default 0.15).
+            segments: Radial segments (default 32).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If stem_radius >= head_radius.
+
+        Example:
+            >>> create_valve("valve.stl", stem_radius=0.1, head_radius=0.5)
+            "valve.stl"
+        """
+        return _core.create_valve(
+            output_path, stem_radius, stem_length, head_radius, head_height, segments
+        )
+
+    @mcp.tool()
+    def create_camshaft_lobe(
+        output_path: str,
+        base_radius: float = 0.8,
+        lift: float = 0.4,
+        lobe_width: float = 0.8,
+        segments: int = 64,
+    ) -> str:
+        """Creates a cam lobe mesh for camshaft design.
+
+        The lobe is a disc with an eccentric nose on the +X side; axis along Y.
+
+        Args:
+            output_path: Output STL file path.
+            base_radius: Base-circle radius (default 0.8).
+            lift: Maximum lift — nose height above base circle (default 0.4).
+            lobe_width: Axial width along Y (default 0.8).
+            segments: Circumferential polygon segments (default 64).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_camshaft_lobe("lobe.stl", base_radius=1.0, lift=0.5)
+            "lobe.stl"
+        """
+        return _core.create_camshaft_lobe(output_path, base_radius, lift, lobe_width, segments)
+
+    @mcp.tool()
+    def array_linear(
+        path: str, output_path: str, count: int, dx: float, dy: float, dz: float
+    ) -> str:
+        """Creates a linear array of mesh copies.
+
+        Produces `count` total copies spaced by (dx, dy, dz) per step.
+        Useful for placing multiple cylinders in an engine bank.
+
+        Args:
+            path: Input STL file path.
+            output_path: Output STL file path.
+            count: Total copies including the original (minimum 1).
+            dx: X offset per step.
+            dy: Y offset per step.
+            dz: Z offset per step.
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            FileNotFoundError: If the input file does not exist.
+            ValueError: If count < 1.
+
+        Example:
+            >>> array_linear("cylinder.stl", "cylinders.stl", 4, 3.0, 0.0, 0.0)
+            "cylinders.stl"
+        """
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"STL file not found: {path}")
+
+        return _core.array_linear(path, output_path, count, dx, dy, dz)
+
+    @mcp.tool()
+    def array_circular(
+        path: str, output_path: str, count: int, axis: str = "y"
+    ) -> str:
+        """Creates a circular array of mesh copies around a coordinate axis.
+
+        Produces `count` copies at equal angular intervals (360/count degrees)
+        around the world-origin axis. Useful for valve arrangements and bolt
+        patterns.
+
+        Args:
+            path: Input STL file path.
+            output_path: Output STL file path.
+            count: Total copies (minimum 1).
+            axis: Rotation axis — 'x', 'y', or 'z' (default 'y').
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            FileNotFoundError: If the input file does not exist.
+            ValueError: If count < 1 or axis is invalid.
+
+        Example:
+            >>> array_circular("bolt_hole.stl", "bolt_pattern.stl", 6, axis="y")
+            "bolt_pattern.stl"
+        """
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"STL file not found: {path}")
+
+        return _core.array_circular(path, output_path, count, axis)
+
     @mcp.resource("stl://{filepath}")
     def get_stl_info(filepath: str) -> dict[str, object]:
         """Resource URI to get mesh information for an STL file.

@@ -9,18 +9,26 @@ from mcp_stl._core import (
     _compute_center,
     _parse_ascii,
     _parse_binary,
+    array_circular,
+    array_linear,
     combine_stl,
     create_box,
+    create_camshaft_lobe,
     create_capsule,
     create_cone,
+    create_connecting_rod,
+    create_crankshaft,
     create_cube,
     create_cylinder,
     create_ellipsoid,
     create_frustum,
+    create_gear,
     create_plane,
     create_sphere,
+    create_spring,
     create_torus,
     create_tube,
+    create_valve,
     get_mesh_info,
     mirror_stl,
     read_stl_file,
@@ -792,4 +800,388 @@ def test_combine_stl_empty_list_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="At least one"):
         combine_stl([], str(combined_path))
+
+
+# ---------------------------------------------------------------------------
+# Engine shapes
+# ---------------------------------------------------------------------------
+
+
+def test_create_gear_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "gear.stl"
+
+    result = create_gear(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_gear_custom_params(tmp_path: Path) -> None:
+    output_path = tmp_path / "gear_custom.stl"
+
+    create_gear(str(output_path), module=2.0, teeth=16, thickness=1.5, segments_per_tooth=6)
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+    # Outer radius = module * teeth/2 + module = 2*(16/2 + 1) = 18; diameter ≈ 36
+    span_x = mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]
+    assert 35.0 < span_x < 37.0
+
+
+def test_create_gear_pressure_angle_effect(tmp_path: Path) -> None:
+    out1 = tmp_path / "gear_pa10.stl"
+    out2 = tmp_path / "gear_pa30.stl"
+
+    # Different pressure angles should produce different face counts
+    create_gear(str(out1), teeth=12, pressure_angle_deg=10.0)
+    create_gear(str(out2), teeth=12, pressure_angle_deg=30.0)
+
+    m1 = read_stl_file(str(out1))
+    m2 = read_stl_file(str(out2))
+    assert m1.face_count > 0
+    assert m2.face_count > 0
+
+
+def test_create_gear_too_few_teeth_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_gear.stl"
+
+    with pytest.raises(ValueError, match="teeth must be at least 4"):
+        create_gear(str(output_path), teeth=3)
+
+
+def test_create_spring_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "spring.stl"
+
+    result = create_spring(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_spring_height(tmp_path: Path) -> None:
+    output_path = tmp_path / "spring_h.stl"
+
+    create_spring(str(output_path), coil_radius=1.0, wire_radius=0.05, turns=3, height=4.0)
+
+    mesh = read_stl_file(str(output_path))
+    total_height = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    # Spring body = requested height; wire ends extend by ~wire_radius on each side.
+    # For turns=3, height=4.0, wire_radius=0.05 the total should be ≈ 4.1.
+    assert abs(total_height - 4.0) < 0.3
+
+
+def test_create_spring_custom_params(tmp_path: Path) -> None:
+    output_path = tmp_path / "spring_custom.stl"
+
+    create_spring(
+        str(output_path),
+        coil_radius=0.5,
+        wire_radius=0.05,
+        turns=4.0,
+        height=3.0,
+        segments=16,
+        wire_segments=6,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_connecting_rod_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "rod.stl"
+
+    result = create_connecting_rod(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_connecting_rod_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "rod_dim.stl"
+
+    create_connecting_rod(str(output_path), length=8.0, segments=16)
+
+    mesh = read_stl_file(str(output_path))
+    height = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    # Total extent along Y must be at least the rod length
+    assert height >= 8.0
+
+
+def test_create_connecting_rod_invalid_big_end_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "rod_bad.stl"
+
+    with pytest.raises(ValueError, match="big_end_inner_radius"):
+        create_connecting_rod(str(output_path), big_end_outer_radius=0.5, big_end_inner_radius=0.8)
+
+
+def test_create_connecting_rod_invalid_small_end_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "rod_bad2.stl"
+
+    with pytest.raises(ValueError, match="small_end_inner_radius"):
+        create_connecting_rod(
+            str(output_path), small_end_outer_radius=0.3, small_end_inner_radius=0.5
+        )
+
+
+def test_create_crankshaft_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "crank.stl"
+
+    result = create_crankshaft(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_crankshaft_single_throw(tmp_path: Path) -> None:
+    output_path = tmp_path / "crank1.stl"
+
+    create_crankshaft(str(output_path), throws=1, segments=16)
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_crankshaft_custom_params(tmp_path: Path) -> None:
+    output_path = tmp_path / "crank_custom.stl"
+
+    create_crankshaft(
+        str(output_path),
+        throws=6,
+        main_journal_radius=0.6,
+        rod_journal_radius=0.5,
+        journal_width=0.5,
+        crank_arm_thickness=0.3,
+        stroke=2.5,
+        segments=16,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_crankshaft_invalid_throws_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "crank_bad.stl"
+
+    with pytest.raises(ValueError, match="throws must be at least 1"):
+        create_crankshaft(str(output_path), throws=0)
+
+
+def test_create_valve_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "valve.stl"
+
+    result = create_valve(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_valve_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "valve_dim.stl"
+
+    create_valve(
+        str(output_path),
+        stem_radius=0.1,
+        stem_length=4.0,
+        head_radius=0.5,
+        head_height=0.2,
+        segments=16,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    total_height = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    # stem_length + head_height = 4.2; allow a small tolerance
+    assert abs(total_height - 4.2) < 0.05
+    # Head radius sets the max X/Z extent
+    span_x = mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]
+    assert abs(span_x - 2 * 0.5) < 0.05
+
+
+def test_create_valve_invalid_radii_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "valve_bad.stl"
+
+    with pytest.raises(ValueError, match="stem_radius must be less than head_radius"):
+        create_valve(str(output_path), stem_radius=0.8, head_radius=0.5)
+
+
+def test_create_camshaft_lobe_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "lobe.stl"
+
+    result = create_camshaft_lobe(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_camshaft_lobe_lift(tmp_path: Path) -> None:
+    output_path = tmp_path / "lobe_lift.stl"
+
+    create_camshaft_lobe(str(output_path), base_radius=1.0, lift=0.5, lobe_width=0.6)
+
+    mesh = read_stl_file(str(output_path))
+    # Maximum radius should be approximately base_radius + lift = 1.5
+    max_x = mesh.bounding_box["x"][1]
+    assert abs(max_x - 1.5) < 0.05
+    # Minimum radius (base) should be approximately -base_radius = -1.0
+    min_x = mesh.bounding_box["x"][0]
+    assert abs(min_x - (-1.0)) < 0.05
+
+
+def test_create_camshaft_lobe_width(tmp_path: Path) -> None:
+    output_path = tmp_path / "lobe_width.stl"
+
+    create_camshaft_lobe(str(output_path), lobe_width=1.2, segments=32)
+
+    mesh = read_stl_file(str(output_path))
+    height = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    assert abs(height - 1.2) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Engine transformations
+# ---------------------------------------------------------------------------
+
+
+def test_array_linear_default(tmp_path: Path) -> None:
+    src = tmp_path / "cylinder.stl"
+    dst = tmp_path / "linear.stl"
+
+    create_cylinder(str(src), radius=0.5, height=1.0, segments=8)
+
+    result = array_linear(str(src), str(dst), 3, 2.0, 0.0, 0.0)
+
+    assert result == str(dst)
+    assert dst.exists()
+
+    original = read_stl_file(str(src))
+    arrayed = read_stl_file(str(dst))
+    assert arrayed.face_count == original.face_count * 3
+
+
+def test_array_linear_spacing(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "cubes.stl"
+
+    create_cube(str(src), size=1.0)
+    array_linear(str(src), str(dst), 4, 5.0, 0.0, 0.0)
+
+    mesh = read_stl_file(str(dst))
+    span = mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]
+    # 4 copies at x = 0, 5, 10, 15 each centred; half-size of cube = 0.5.
+    # Total span = (15 + 0.5) - (0 - 0.5) = 16.0
+    assert abs(span - 16.0) < 0.01
+
+
+def test_array_linear_count_one(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "single.stl"
+
+    create_cube(str(src))
+    array_linear(str(src), str(dst), 1, 10.0, 0.0, 0.0)
+
+    original = read_stl_file(str(src))
+    result = read_stl_file(str(dst))
+    assert result.face_count == original.face_count
+    np.testing.assert_array_almost_equal(result.vertices, original.vertices)
+
+
+def test_array_linear_invalid_count_raises(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "bad.stl"
+
+    create_cube(str(src))
+
+    with pytest.raises(ValueError, match="count must be at least 1"):
+        array_linear(str(src), str(dst), 0, 1.0, 0.0, 0.0)
+
+
+def test_array_circular_default(tmp_path: Path) -> None:
+    src = tmp_path / "cylinder.stl"
+    dst = tmp_path / "circular.stl"
+
+    create_cylinder(str(src), radius=0.2, height=1.0, segments=8)
+    result = array_circular(str(src), str(dst), 6)
+
+    assert result == str(dst)
+    assert dst.exists()
+
+    original = read_stl_file(str(src))
+    arrayed = read_stl_file(str(dst))
+    assert arrayed.face_count == original.face_count * 6
+
+
+def test_array_circular_single_copy(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "single_circ.stl"
+
+    create_cube(str(src))
+    array_circular(str(src), str(dst), 1, axis="y")
+
+    original = read_stl_file(str(src))
+    result = read_stl_file(str(dst))
+    assert result.face_count == original.face_count
+    np.testing.assert_array_almost_equal(result.vertices, original.vertices, decimal=5)
+
+
+def test_array_circular_symmetry(tmp_path: Path) -> None:
+    src = tmp_path / "cyl.stl"
+    dst = tmp_path / "sym.stl"
+
+    create_cylinder(str(src), radius=0.3, height=0.5, segments=8)
+    array_circular(str(src), str(dst), 4, axis="y")
+
+    mesh = read_stl_file(str(dst))
+    # Circular array of 4 copies symmetric around Y; x and z spans should be equal
+    span_x = mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]
+    span_z = mesh.bounding_box["z"][1] - mesh.bounding_box["z"][0]
+    assert abs(span_x - span_z) < 0.05
+
+
+def test_array_circular_x_axis(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "circ_x.stl"
+
+    create_cube(str(src))
+    array_circular(str(src), str(dst), 3, axis="x")
+
+    mesh = read_stl_file(str(dst))
+    assert mesh.face_count > 0
+
+
+def test_array_circular_invalid_axis_raises(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "bad_circ.stl"
+
+    create_cube(str(src))
+
+    with pytest.raises(ValueError, match="Invalid axis"):
+        array_circular(str(src), str(dst), 4, axis="w")
+
+
+def test_array_circular_invalid_count_raises(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "bad_circ2.stl"
+
+    create_cube(str(src))
+
+    with pytest.raises(ValueError, match="count must be at least 1"):
+        array_circular(str(src), str(dst), 0)
+
 
