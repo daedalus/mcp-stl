@@ -300,6 +300,239 @@ def create_mcp_server() -> fastmcp.FastMCP:
         """
         return _core.create_plane(output_path, width, height)
 
+    @mcp.tool()
+    def create_box(
+        output_path: str,
+        width: float = 1.0,
+        height: float = 1.0,
+        depth: float = 1.0,
+        center: list[float] | None = None,
+    ) -> str:
+        """Creates a rectangular box (cuboid) mesh with independent dimensions.
+
+        Args:
+            output_path: Output STL file path.
+            width: Box width along X axis (default 1.0).
+            height: Box height along Y axis (default 1.0).
+            depth: Box depth along Z axis (default 1.0).
+            center: Center position as [x, y, z] (default [0, 0, 0]).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_box("box.stl", width=2.0, height=0.5, depth=1.5)
+            "box.stl"
+        """
+        return _core.create_box(output_path, width, height, depth, center)
+
+    @mcp.tool()
+    def create_capsule(
+        output_path: str,
+        radius: float = 0.5,
+        height: float = 2.0,
+        segments: int = 32,
+    ) -> str:
+        """Creates a capsule mesh (cylinder with hemispherical end caps).
+
+        Useful for robot arm link bodies with smooth rounded ends.
+
+        Args:
+            output_path: Output STL file path.
+            radius: Radius of the cylinder and hemispheres (default 0.5).
+            height: Height of the cylindrical section only (default 2.0).
+            segments: Number of radial/latitude segments (default 32).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_capsule("link.stl", radius=0.3, height=1.5)
+            "link.stl"
+        """
+        return _core.create_capsule(output_path, radius, height, segments)
+
+    @mcp.tool()
+    def create_ellipsoid(
+        output_path: str,
+        rx: float = 1.0,
+        ry: float = 0.5,
+        rz: float = 0.75,
+        segments: int = 32,
+    ) -> str:
+        """Creates an ellipsoid mesh with independent radii on each axis.
+
+        Useful for joint housings and actuator enclosures in robot arm designs.
+
+        Args:
+            output_path: Output STL file path.
+            rx: Radius along X axis (default 1.0).
+            ry: Radius along Y axis (default 0.5).
+            rz: Radius along Z axis (default 0.75).
+            segments: Number of latitude/longitude segments (default 32).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_ellipsoid("joint.stl", rx=0.8, ry=0.4, rz=0.6)
+            "joint.stl"
+        """
+        return _core.create_ellipsoid(output_path, rx, ry, rz, segments)
+
+    @mcp.tool()
+    def create_frustum(
+        output_path: str,
+        bottom_radius: float = 1.0,
+        top_radius: float = 0.5,
+        height: float = 2.0,
+        segments: int = 32,
+    ) -> str:
+        """Creates a frustum (truncated cone) mesh.
+
+        Useful for tapered robot arm segments transitioning between joint diameters.
+
+        Args:
+            output_path: Output STL file path.
+            bottom_radius: Radius of the bottom circle (default 1.0).
+            top_radius: Radius of the top circle (default 0.5).
+            height: Frustum height (default 2.0).
+            segments: Number of radial segments (default 32).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_frustum("taper.stl", bottom_radius=0.8, top_radius=0.4, height=1.5)
+            "taper.stl"
+        """
+        return _core.create_frustum(output_path, bottom_radius, top_radius, height, segments)
+
+    @mcp.tool()
+    def create_tube(
+        output_path: str,
+        outer_radius: float = 1.0,
+        inner_radius: float = 0.7,
+        height: float = 2.0,
+        segments: int = 32,
+    ) -> str:
+        """Creates a hollow cylinder (tube) mesh.
+
+        Useful for hollow structural link bodies in robot arm designs.
+
+        Args:
+            output_path: Output STL file path.
+            outer_radius: Outer radius (default 1.0).
+            inner_radius: Inner (bore) radius, must be less than outer_radius (default 0.7).
+            height: Tube height (default 2.0).
+            segments: Number of radial segments (default 32).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If inner_radius >= outer_radius.
+
+        Example:
+            >>> create_tube("link.stl", outer_radius=0.5, inner_radius=0.35, height=3.0)
+            "link.stl"
+        """
+        return _core.create_tube(output_path, outer_radius, inner_radius, height, segments)
+
+    @mcp.tool()
+    def mirror_stl(path: str, output_path: str, axis: str) -> str:
+        """Mirrors (reflects) the mesh across the plane perpendicular to the given axis.
+
+        Useful for creating symmetric robot arm structures from a single side.
+
+        Args:
+            path: Input STL file path.
+            output_path: Output STL file path.
+            axis: Mirror axis ('x', 'y', or 'z'). The mesh is reflected across
+                  the plane perpendicular to this axis passing through the origin.
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            FileNotFoundError: If the input file does not exist.
+            ValueError: If axis is invalid or input file is not a valid STL.
+
+        Example:
+            >>> mirror_stl("input.stl", "mirrored.stl", "x")
+            "mirrored.stl"
+        """
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"STL file not found: {path}")
+
+        return _core.mirror_stl(path, output_path, axis)
+
+    @mcp.tool()
+    def rotate_stl_axis(
+        path: str,
+        output_path: str,
+        ax: float,
+        ay: float,
+        az: float,
+        angle: float,
+    ) -> str:
+        """Rotates the mesh around an arbitrary axis vector using Rodrigues' rotation.
+
+        Essential for 6-DOF robot arm kinematic simulations where joints rotate
+        around non-cardinal axes.
+
+        Args:
+            path: Input STL file path.
+            output_path: Output STL file path.
+            ax: X component of the rotation axis vector.
+            ay: Y component of the rotation axis vector.
+            az: Z component of the rotation axis vector.
+            angle: Rotation angle in degrees.
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            FileNotFoundError: If the input file does not exist.
+            ValueError: If the axis vector is the zero vector or the file is invalid.
+
+        Example:
+            >>> rotate_stl_axis("input.stl", "output.stl", 1.0, 1.0, 0.0, 45.0)
+            "output.stl"
+        """
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"STL file not found: {path}")
+
+        return _core.rotate_stl_axis(path, output_path, ax, ay, az, angle)
+
+    @mcp.tool()
+    def combine_stl(paths: list[str], output_path: str) -> str:
+        """Merges multiple STL files into a single STL file.
+
+        Used to assemble individual robot arm components (base, links, joints,
+        end-effector) into a complete robot arm model.
+
+        Args:
+            paths: List of input STL file paths to merge.
+            output_path: Output STL file path.
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            FileNotFoundError: If any input file does not exist.
+            ValueError: If paths is empty or any file is not a valid STL.
+
+        Example:
+            >>> combine_stl(["base.stl", "link1.stl", "link2.stl"], "robot.stl")
+            "robot.stl"
+        """
+        for p in paths:
+            if not os.path.exists(p):
+                raise FileNotFoundError(f"STL file not found: {p}")
+
+        return _core.combine_stl(paths, output_path)
+
     @mcp.resource("stl://{filepath}")
     def get_stl_info(filepath: str) -> dict[str, object]:
         """Resource URI to get mesh information for an STL file.
