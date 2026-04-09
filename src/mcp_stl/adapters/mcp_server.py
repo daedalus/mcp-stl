@@ -972,7 +972,7 @@ def create_mcp_server() -> fastmcp.FastMCP:
 
         return _core.shear_stl(path, output_path, xy, xz, yx, yz, zx, zy)
 
-
+    @mcp.resource("stl://{filepath}")
     def get_stl_info(filepath: str) -> dict[str, object]:
         """Resource URI to get mesh information for an STL file.
 
