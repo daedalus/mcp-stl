@@ -2383,6 +2383,393 @@ def create_camshaft_lobe(
     return output_path
 
 
+# ──────────────────────────── rocket engine shapes ───────────────────────────
+
+
+def create_bell_nozzle(
+    output_path: str,
+    throat_radius: float = 0.15,
+    exit_radius: float = 0.75,
+    chamber_radius: float = 0.35,
+    chamber_length: float = 0.3,
+    convergent_length: float = 0.2,
+    bell_length: float = 1.0,
+    wall_thickness: float = 0.04,
+    segments: int = 32,
+    profile_points: int = 16,
+) -> str:
+    """Creates a bell nozzle (convergent-divergent de Laval nozzle) mesh.
+
+    The nozzle axis is aligned along Y. ``y=0`` is the combustion-chamber
+    inlet; ``y = chamber_length + convergent_length + bell_length`` is the
+    nozzle exit plane.
+
+    Profile sections:
+
+    * **Combustion chamber** (``y ∈ [0, chamber_length]``): cylindrical bore
+      at ``chamber_radius``.
+    * **Convergent section** (``y ∈ [chamber_length, chamber_length +
+      convergent_length]``): cosine-blend taper from ``chamber_radius`` down
+      to ``throat_radius``.
+    * **Divergent bell** (``y ∈ [chamber_length + convergent_length,
+      total_length]``): quarter-sine flare from ``throat_radius`` out to
+      ``exit_radius``, giving the characteristic bell contour.
+
+    The mesh is a hollow thin-walled structure (outer surface, inner bore,
+    and two annular end caps) parametrised by ``wall_thickness``.
+
+    Args:
+        output_path: Output STL file path.
+        throat_radius: Nozzle throat (minimum) radius (default 0.15).
+        exit_radius: Nozzle exit plane radius (default 0.75).
+        chamber_radius: Combustion chamber bore radius (default 0.35).
+        chamber_length: Length of cylindrical chamber section (default 0.3).
+        convergent_length: Length of the converging section (default 0.2).
+        bell_length: Length of the diverging bell section (default 1.0).
+        wall_thickness: Nozzle wall thickness (default 0.04).
+        segments: Number of circumferential segments (default 32).
+        profile_points: Axial profile points per section (default 16).
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        ValueError: If ``throat_radius >= chamber_radius``,
+            ``throat_radius >= exit_radius``, or
+            ``wall_thickness >= throat_radius``.
+
+    Example:
+        >>> create_bell_nozzle("nozzle.stl", throat_radius=0.15, exit_radius=0.75)
+        "nozzle.stl"
+    """
+    if throat_radius >= chamber_radius:
+        raise ValueError("throat_radius must be less than chamber_radius")
+    if throat_radius >= exit_radius:
+        raise ValueError("throat_radius must be less than exit_radius")
+    if wall_thickness >= throat_radius:
+        raise ValueError("wall_thickness must be less than throat_radius")
+
+    # Build inner-bore radial profile: list of (y, r_inner) pairs
+    profile: list[tuple[float, float]] = []
+
+    # 1. Combustion-chamber section (cylindrical)
+    n_chamber = max(2, profile_points // 4)
+    for i in range(n_chamber):
+        t = i / (n_chamber - 1)
+        profile.append((t * chamber_length, chamber_radius))
+
+    # 2. Convergent section (cosine-blend taper)
+    n_conv = max(3, profile_points // 4)
+    y_conv_start = chamber_length
+    for i in range(1, n_conv + 1):
+        t = i / n_conv
+        r = (throat_radius + (chamber_radius - throat_radius)
+             * 0.5 * (1.0 + float(np.cos(np.pi * t))))
+        profile.append((y_conv_start + t * convergent_length, r))
+
+    # 3. Divergent bell section (quarter-sine flare)
+    n_bell = max(3, profile_points // 2)
+    y_bell_start = chamber_length + convergent_length
+    for i in range(1, n_bell + 1):
+        t = i / n_bell
+        r = (throat_radius
+             + (exit_radius - throat_radius) * float(np.sin(t * np.pi / 2.0)))
+        profile.append((y_bell_start + t * bell_length, r))
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    n_p = len(profile)
+
+    # Build hollow-wall segments between adjacent profile rings
+    for k in range(n_p - 1):
+        y0_seg, r0_in = profile[k]
+        y1_seg, r1_in = profile[k + 1]
+        r0_out = r0_in + wall_thickness
+        r1_out = r1_in + wall_thickness
+
+        dy = y1_seg - y0_seg
+        dr = r1_in - r0_in  # same for inner and outer (uniform wall thickness)
+
+        slant_len = float(np.sqrt(dy * dy + dr * dr))
+        if slant_len < 1e-12:
+            slant_len = 1e-12
+
+        # Outward normal components for outer surface (matches frustum formula)
+        nxz_out = dy / slant_len
+        ny_out = -dr / slant_len
+        # Inward normal components for inner surface
+        nxz_in = -dy / slant_len
+        ny_in = dr / slant_len
+
+        for j in range(segments):
+            theta1 = (j / segments) * 2.0 * np.pi
+            theta2 = ((j + 1) / segments) * 2.0 * np.pi
+            c1, s1 = float(np.cos(theta1)), float(np.sin(theta1))
+            c2, s2 = float(np.cos(theta2)), float(np.sin(theta2))
+
+            # Outer-surface vertices
+            ox0c1 = r0_out * c1
+            oz0c1 = r0_out * s1
+            ox0c2 = r0_out * c2
+            oz0c2 = r0_out * s2
+            ox1c1 = r1_out * c1
+            oz1c1 = r1_out * s1
+            ox1c2 = r1_out * c2
+            oz1c2 = r1_out * s2
+
+            # Inner-surface vertices
+            ix0c1 = r0_in * c1
+            iz0c1 = r0_in * s1
+            ix0c2 = r0_in * c2
+            iz0c2 = r0_in * s2
+            ix1c1 = r1_in * c1
+            iz1c1 = r1_in * s1
+            ix1c2 = r1_in * c2
+            iz1c2 = r1_in * s2
+
+            no1: list[float] = [nxz_out * c1, ny_out, nxz_out * s1]
+            no2: list[float] = [nxz_out * c2, ny_out, nxz_out * s2]
+            ni1: list[float] = [nxz_in * c1, ny_in, nxz_in * s1]
+            ni2: list[float] = [nxz_in * c2, ny_in, nxz_in * s2]
+
+            # Outer surface (outward normals)
+            verts_list.extend([
+                [ox0c1, y0_seg, oz0c1], [ox0c2, y0_seg, oz0c2],
+                [ox1c1, y1_seg, oz1c1],
+                [ox0c2, y0_seg, oz0c2], [ox1c2, y1_seg, oz1c2],
+                [ox1c1, y1_seg, oz1c1],
+            ])
+            normals_list.extend([no1, no2, no1, no2, no2, no1])
+
+            # Inner surface (reversed winding → inward normals)
+            verts_list.extend([
+                [ix1c1, y1_seg, iz1c1], [ix1c2, y1_seg, iz1c2],
+                [ix0c1, y0_seg, iz0c1],
+                [ix1c2, y1_seg, iz1c2], [ix0c2, y0_seg, iz0c2],
+                [ix0c1, y0_seg, iz0c1],
+            ])
+            normals_list.extend([ni1, ni2, ni1, ni2, ni2, ni1])
+
+    # Inlet annular end cap (at y=0, normal −Y, chamber inlet)
+    y_inlet = profile[0][0]
+    r_inlet_in = profile[0][1]
+    r_inlet_out = r_inlet_in + wall_thickness
+    for j in range(segments):
+        theta1 = (j / segments) * 2.0 * np.pi
+        theta2 = ((j + 1) / segments) * 2.0 * np.pi
+        ox1 = r_inlet_out * float(np.cos(theta1))
+        oz1 = r_inlet_out * float(np.sin(theta1))
+        ox2 = r_inlet_out * float(np.cos(theta2))
+        oz2 = r_inlet_out * float(np.sin(theta2))
+        ix1 = r_inlet_in * float(np.cos(theta1))
+        iz1 = r_inlet_in * float(np.sin(theta1))
+        ix2 = r_inlet_in * float(np.cos(theta2))
+        iz2 = r_inlet_in * float(np.sin(theta2))
+        verts_list.extend([
+            [ix1, y_inlet, iz1], [ix2, y_inlet, iz2], [ox2, y_inlet, oz2],
+            [ix1, y_inlet, iz1], [ox2, y_inlet, oz2], [ox1, y_inlet, oz1],
+        ])
+        normals_list.extend([[0.0, -1.0, 0.0]] * 6)
+
+    # Exit annular end cap (at y_exit, normal +Y, nozzle exit)
+    y_exit = profile[-1][0]
+    r_exit_in = profile[-1][1]
+    r_exit_out = r_exit_in + wall_thickness
+    for j in range(segments):
+        theta1 = (j / segments) * 2.0 * np.pi
+        theta2 = ((j + 1) / segments) * 2.0 * np.pi
+        ox1 = r_exit_out * float(np.cos(theta1))
+        oz1 = r_exit_out * float(np.sin(theta1))
+        ox2 = r_exit_out * float(np.cos(theta2))
+        oz2 = r_exit_out * float(np.sin(theta2))
+        ix1 = r_exit_in * float(np.cos(theta1))
+        iz1 = r_exit_in * float(np.sin(theta1))
+        ix2 = r_exit_in * float(np.cos(theta2))
+        iz2 = r_exit_in * float(np.sin(theta2))
+        verts_list.extend([
+            [ox1, y_exit, oz1], [ox2, y_exit, oz2], [ix2, y_exit, iz2],
+            [ox1, y_exit, oz1], [ix2, y_exit, iz2], [ix1, y_exit, iz1],
+        ])
+        normals_list.extend([[0.0, 1.0, 0.0]] * 6)
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def create_injector_plate(
+    output_path: str,
+    radius: float = 0.35,
+    thickness: float = 0.05,
+    num_elements: int = 18,
+    element_radius: float = 0.015,
+    pattern_radius: float = 0.22,
+    segments: int = 32,
+) -> str:
+    """Creates a propellant injector plate mesh.
+
+    The plate is a solid flat disc with a circular array of small cylindrical
+    injector-element stubs protruding from the top face (``+Y`` direction).
+    The plate axis is aligned along Y with the bottom face at ``y=0`` and the
+    top face at ``y=thickness``.
+
+    Suitable for the combustion-chamber injector head of liquid rocket engines
+    such as the RD-180.  Use ``array_circular`` to add a central element, or
+    combine multiple rings by calling this function several times with
+    different ``pattern_radius`` values.
+
+    Args:
+        output_path: Output STL file path.
+        radius: Outer radius of the plate (default 0.35).
+        thickness: Plate thickness along Y (default 0.05).
+        num_elements: Number of injector-element stubs around the ring
+            (default 18).
+        element_radius: Radius of each cylindrical injector stub (default
+            0.015).
+        pattern_radius: Radial distance from the plate centre to each stub
+            centreline (default 0.22).
+        segments: Circumferential segments for the plate and stubs (default
+            32).
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        ValueError: If ``pattern_radius + element_radius >= radius``.
+
+    Example:
+        >>> create_injector_plate("injector.stl", num_elements=24)
+        "injector.stl"
+    """
+    if pattern_radius + element_radius >= radius:
+        raise ValueError(
+            "pattern_radius + element_radius must be less than plate radius"
+        )
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    # Main plate body: solid disc
+    _add_cylinder_verts(
+        verts_list, normals_list,
+        0.0, 0.0, thickness, 0.0,
+        radius, segments,
+        cap_bot=True, cap_top=True,
+    )
+
+    # Injector-element stubs protruding from the top face (+Y)
+    stub_height = thickness  # stubs are as tall as the plate is thick
+    stub_segs = max(6, segments // 4)
+    for k in range(num_elements):
+        angle = (k / num_elements) * 2.0 * np.pi
+        cx = pattern_radius * float(np.cos(angle))
+        cz = pattern_radius * float(np.sin(angle))
+        _add_cylinder_verts(
+            verts_list, normals_list,
+            cx, thickness, thickness + stub_height, cz,
+            element_radius, stub_segs,
+            cap_bot=False, cap_top=True,
+        )
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def create_pump_housing(
+    output_path: str,
+    bore_radius: float = 0.25,
+    housing_radius: float = 0.6,
+    housing_height: float = 0.35,
+    outlet_radius: float = 0.12,
+    outlet_length: float = 0.25,
+    segments: int = 32,
+) -> str:
+    """Creates a centrifugal pump housing (volute casing) mesh.
+
+    The housing is a hollow cylindrical casing (like a thick annular disc)
+    with the pump axis along Y.  A cylindrical outlet pipe extends radially
+    from the outer casing wall in the ``+X`` direction, representing the
+    volute discharge port.
+
+    The assembly models the outer casing of a turbopump such as those used
+    in the RD-180 engine.  Combine with ``create_turbine_disk`` and
+    ``create_turbine_blade`` (via ``array_circular``) to build a full
+    turbopump stage.
+
+    Args:
+        output_path: Output STL file path.
+        bore_radius: Inner bore radius for the impeller cavity (default 0.25).
+        housing_radius: Outer casing radius (default 0.6).
+        housing_height: Axial height of the casing along Y (default 0.35).
+        outlet_radius: Radius of the discharge outlet pipe (default 0.12).
+        outlet_length: Length of the outlet pipe along X (default 0.25).
+        segments: Number of circumferential segments (default 32).
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        ValueError: If ``bore_radius >= housing_radius`` or
+            ``outlet_radius >= housing_radius``.
+
+    Example:
+        >>> create_pump_housing("pump.stl", bore_radius=0.2, housing_radius=0.5)
+        "pump.stl"
+    """
+    if bore_radius >= housing_radius:
+        raise ValueError("bore_radius must be less than housing_radius")
+    if outlet_radius >= housing_radius:
+        raise ValueError("outlet_radius must be less than housing_radius")
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    half_h = housing_height / 2.0
+
+    # Main hollow cylindrical casing (outer wall, inner wall, top/bottom caps)
+    _add_tube_verts(
+        verts_list, normals_list,
+        -half_h, half_h,
+        housing_radius, bore_radius,
+        segments,
+    )
+
+    # Outlet pipe: cylinder along +X from x=housing_radius to
+    # x=housing_radius+outlet_length, centred at y=0, z=0.
+    x_start = housing_radius
+    x_end = housing_radius + outlet_length
+    for j in range(segments):
+        theta1 = (j / segments) * 2.0 * np.pi
+        theta2 = ((j + 1) / segments) * 2.0 * np.pi
+        y1 = outlet_radius * float(np.cos(theta1))
+        z1 = outlet_radius * float(np.sin(theta1))
+        y2 = outlet_radius * float(np.cos(theta2))
+        z2 = outlet_radius * float(np.sin(theta2))
+
+        # Outward radial normal in the Y-Z plane
+        n1: list[float] = _normalize([0.0, y1, z1])
+        n2: list[float] = _normalize([0.0, y2, z2])
+
+        # Outlet cylinder side wall
+        verts_list.extend([
+            [x_start, y1, z1], [x_start, y2, z2], [x_end, y1, z1],
+            [x_start, y2, z2], [x_end, y2, z2], [x_end, y1, z1],
+        ])
+        normals_list.extend([n1, n2, n1, n2, n2, n1])
+
+        # Outlet end cap (at x_end, normal +X)
+        verts_list.extend([
+            [x_end, y1, z1], [x_end, y2, z2], [x_end, 0.0, 0.0],
+        ])
+        normals_list.extend([[1.0, 0.0, 0.0]] * 3)
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
 # ─────────────────────────── engine transformations ──────────────────────────
 
 

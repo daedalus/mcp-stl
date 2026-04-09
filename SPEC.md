@@ -15,6 +15,7 @@ An MCP server that provides tools for parsing, viewing, and editing STL (Stereol
   - Rotate mesh around an arbitrary axis vector (Rodrigues' rotation)
   - Merge multiple STL files into one
   - Generate 3D modeling primitives (cube, box, sphere, cylinder, cone, torus, plane, capsule, ellipsoid, frustum, tube, pyramid, prism, hemisphere, wedge)
+  - Generate rocket engine components (bell nozzle, injector plate, pump housing)
   - Write STL files (both ASCII and binary formats)
   - Provide tools as MCP server for AI integration
 
@@ -271,6 +272,63 @@ An MCP server that provides tools for parsing, viewing, and editing STL (Stereol
       - `zx`: Z shear along X (default 0.0)
       - `zy`: Z shear along Y (default 0.0)
     - Returns: Path to the output file
+
+26. **`create_bell_nozzle(output_path: str, throat_radius: float = 0.15, exit_radius: float = 0.75, chamber_radius: float = 0.35, chamber_length: float = 0.3, convergent_length: float = 0.2, bell_length: float = 1.0, wall_thickness: float = 0.04, segments: int = 32, profile_points: int = 16) -> str`**
+    - Creates a convergent-divergent (de Laval) bell nozzle mesh.
+    - The nozzle axis is aligned along Y. y=0 is the combustion-chamber inlet.
+    - Profile: cylindrical chamber → cosine-blend convergent section → quarter-sine
+      diverging bell section.
+    - Mesh is a hollow thin-walled solid (outer + inner surface + two annular caps).
+    - Essential component of any liquid rocket engine thrust chamber (e.g. RD-180).
+    - Args:
+      - `output_path`: Output STL file path
+      - `throat_radius`: Nozzle throat (minimum) radius (default 0.15)
+      - `exit_radius`: Nozzle exit plane radius (default 0.75)
+      - `chamber_radius`: Combustion chamber bore radius (default 0.35)
+      - `chamber_length`: Length of cylindrical chamber section (default 0.3)
+      - `convergent_length`: Length of converging section (default 0.2)
+      - `bell_length`: Length of diverging bell section (default 1.0)
+      - `wall_thickness`: Nozzle wall thickness (default 0.04)
+      - `segments`: Number of circumferential segments (default 32)
+      - `profile_points`: Axial profile points per section (default 16)
+    - Returns: Path to the output file
+    - Raises: `ValueError` if `throat_radius >= chamber_radius`,
+      `throat_radius >= exit_radius`, or `wall_thickness >= throat_radius`
+
+27. **`create_injector_plate(output_path: str, radius: float = 0.35, thickness: float = 0.05, num_elements: int = 18, element_radius: float = 0.015, pattern_radius: float = 0.22, segments: int = 32) -> str`**
+    - Creates a propellant injector plate mesh.
+    - A solid flat disc (aligned along Y) with a circular array of small cylindrical
+      injector-element stubs protruding from the top face (+Y direction).
+    - Models the injector head of a liquid rocket combustion chamber (e.g. RD-180).
+    - Args:
+      - `output_path`: Output STL file path
+      - `radius`: Outer radius of the plate (default 0.35)
+      - `thickness`: Plate thickness along Y (default 0.05)
+      - `num_elements`: Number of injector-element stubs around the ring (default 18)
+      - `element_radius`: Radius of each cylindrical injector stub (default 0.015)
+      - `pattern_radius`: Radial distance from plate centre to stub centreline (default 0.22)
+      - `segments`: Circumferential segments for plate and stubs (default 32)
+    - Returns: Path to the output file
+    - Raises: `ValueError` if `pattern_radius + element_radius >= radius`
+
+28. **`create_pump_housing(output_path: str, bore_radius: float = 0.25, housing_radius: float = 0.6, housing_height: float = 0.35, outlet_radius: float = 0.12, outlet_length: float = 0.25, segments: int = 32) -> str`**
+    - Creates a centrifugal pump housing (volute casing) mesh.
+    - A hollow cylindrical casing with the pump axis along Y, plus a cylindrical
+      discharge outlet pipe extending in the +X direction.
+    - Models the turbopump casing used in rocket engines such as the RD-180.
+      Combine with `create_turbine_disk` and `create_turbine_blade` + `array_circular`
+      to assemble a complete turbopump stage.
+    - Args:
+      - `output_path`: Output STL file path
+      - `bore_radius`: Inner bore radius for the impeller cavity (default 0.25)
+      - `housing_radius`: Outer casing radius (default 0.6)
+      - `housing_height`: Axial height of the casing along Y (default 0.35)
+      - `outlet_radius`: Radius of the discharge outlet pipe (default 0.12)
+      - `outlet_length`: Length of the outlet pipe along X (default 0.25)
+      - `segments`: Number of circumferential segments (default 32)
+    - Returns: Path to the output file
+    - Raises: `ValueError` if `bore_radius >= housing_radius` or
+      `outlet_radius >= housing_radius`
 
 
 
