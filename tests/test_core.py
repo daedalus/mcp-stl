@@ -1469,12 +1469,11 @@ def test_create_airfoil_dimensions(tmp_path: Path) -> None:
 def test_create_airfoil_thickness(tmp_path: Path) -> None:
     output_path = tmp_path / "airfoil_thick.stl"
 
-    # NACA 0012: thickness = 0.12 * chord = 0.12
+    # NACA 0012: max thickness ≈ 12 % of chord = 0.12 (total Y span ≈ 0.12)
     create_airfoil(str(output_path), chord=1.0, span=1.0, thickness_ratio=0.12, segments=64)
 
     mesh = read_stl_file(str(output_path))
     y_span = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
-    # Total thickness is approximately 2 * 0.12 * 0.15 * chord ≈ 0.12 (NACA max ~12% chord)
     assert y_span > 0.0
     assert y_span < 0.16  # must be less than 16% chord
 
