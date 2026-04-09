@@ -14,7 +14,7 @@ An MCP server that provides tools for parsing, viewing, and editing STL (Stereol
   - Mirror mesh along a plane (X, Y, or Z)
   - Rotate mesh around an arbitrary axis vector (Rodrigues' rotation)
   - Merge multiple STL files into one
-  - Generate 3D modeling primitives (cube, box, sphere, cylinder, cone, torus, plane, capsule, ellipsoid, frustum, tube)
+  - Generate 3D modeling primitives (cube, box, sphere, cylinder, cone, torus, plane, capsule, ellipsoid, frustum, tube, pyramid, prism, hemisphere, wedge)
   - Write STL files (both ASCII and binary formats)
   - Provide tools as MCP server for AI integration
 
@@ -221,7 +221,58 @@ An MCP server that provides tools for parsing, viewing, and editing STL (Stereol
     - Returns: Path to the output file
     - Raises: `ValueError` if `paths` is empty
 
-### MCP Resources
+21. **`create_pyramid(output_path: str, base_radius: float = 1.0, height: float = 2.0, segments: int = 4) -> str`**
+    - Creates a regular pyramid mesh (apex at y=+height/2, base at y=-height/2).
+    - Args:
+      - `output_path`: Output STL file path
+      - `base_radius`: Circumscribed radius of the base polygon (default 1.0)
+      - `height`: Distance from base to apex (default 2.0)
+      - `segments`: Number of base polygon sides (default 4 → square pyramid)
+    - Returns: Path to the output file
+
+22. **`create_prism(output_path: str, radius: float = 1.0, height: float = 2.0, segments: int = 6) -> str`**
+    - Creates a regular n-sided prism mesh.
+    - Args:
+      - `output_path`: Output STL file path
+      - `radius`: Circumscribed radius of the cross-section polygon (default 1.0)
+      - `height`: Prism height along Y axis (default 2.0)
+      - `segments`: Number of polygon sides (default 6 → hexagonal prism)
+    - Returns: Path to the output file
+
+23. **`create_hemisphere(output_path: str, radius: float = 1.0, segments: int = 32) -> str`**
+    - Creates a hemisphere mesh (dome from y=0 to y=radius with a flat circular base at y=0).
+    - Args:
+      - `output_path`: Output STL file path
+      - `radius`: Hemisphere radius (default 1.0)
+      - `segments`: Number of latitude/longitude subdivisions (default 32)
+    - Returns: Path to the output file
+
+24. **`create_wedge(output_path: str, width: float = 1.0, height: float = 1.0, depth: float = 1.0) -> str`**
+    - Creates a right-triangular wedge (triangular prism) mesh.
+    - The right-angle corner is at the origin; width along X, height along Y, extruded along ±Z.
+    - Args:
+      - `output_path`: Output STL file path
+      - `width`: Extent along X axis (default 1.0)
+      - `height`: Extent along Y axis (default 1.0)
+      - `depth`: Extent along Z axis (default 1.0)
+    - Returns: Path to the output file
+
+25. **`shear_stl(path: str, output_path: str, xy: float = 0.0, xz: float = 0.0, yx: float = 0.0, yz: float = 0.0, zx: float = 0.0, zy: float = 0.0) -> str`**
+    - Applies a shear transformation to the mesh.
+    - Each parameter shifts one axis by a given factor per unit along another axis.
+    - Normals are transformed by the inverse-transpose of the shear matrix.
+    - Args:
+      - `path`: Input STL file path
+      - `output_path`: Output STL file path
+      - `xy`: X shear along Y (default 0.0)
+      - `xz`: X shear along Z (default 0.0)
+      - `yx`: Y shear along X (default 0.0)
+      - `yz`: Y shear along Z (default 0.0)
+      - `zx`: Z shear along X (default 0.0)
+      - `zy`: Z shear along Y (default 0.0)
+    - Returns: Path to the output file
+
+
 
 1. **`stl://{filepath}`**
    - Resource URI to get mesh information for a file.

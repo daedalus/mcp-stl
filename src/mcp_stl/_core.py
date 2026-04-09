@@ -1938,6 +1938,343 @@ def array_circular(
     return output_path
 
 
+def create_pyramid(
+    output_path: str,
+    base_radius: float = 1.0,
+    height: float = 2.0,
+    segments: int = 4,
+) -> str:
+    """Creates a regular pyramid mesh.
+
+    The pyramid has a regular n-sided polygon base lying in the XZ plane centred
+    at y=-height/2 and a single apex at y=+height/2.
+
+    Args:
+        output_path: Output STL file path.
+        base_radius: Circumscribed radius of the base polygon (default 1.0).
+        height: Distance from base to apex (default 2.0).
+        segments: Number of base polygon vertices / sides (default 4 → square base).
+
+    Returns:
+        Path to the output file.
+    """
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    half_h = height / 2
+    apex = [0.0, half_h, 0.0]
+
+    for i in range(segments):
+        theta1 = (i / segments) * 2 * np.pi
+        theta2 = ((i + 1) / segments) * 2 * np.pi
+
+        x1 = base_radius * np.cos(theta1)
+        z1 = base_radius * np.sin(theta1)
+        x2 = base_radius * np.cos(theta2)
+        z2 = base_radius * np.sin(theta2)
+
+        base1 = [x1, -half_h, z1]
+        base2 = [x2, -half_h, z2]
+
+        # Side face: base1, base2, apex
+        edge1 = [x2 - x1, 0.0, z2 - z1]
+        edge2 = [-x1, height, -z1]
+        side_normal = _normalize(
+            [
+                edge1[1] * edge2[2] - edge1[2] * edge2[1],
+                edge1[2] * edge2[0] - edge1[0] * edge2[2],
+                edge1[0] * edge2[1] - edge1[1] * edge2[0],
+            ]
+        )
+        verts_list.extend([base1, base2, apex])
+        normals_list.extend([side_normal, side_normal, side_normal])
+
+        # Bottom face: base2, base1, center (winding for outward-pointing downward normal)
+        verts_list.extend([base2, base1, [0.0, -half_h, 0.0]])
+        normals_list.extend(
+            [[0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0]]
+        )
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def create_prism(
+    output_path: str,
+    radius: float = 1.0,
+    height: float = 2.0,
+    segments: int = 6,
+) -> str:
+    """Creates a regular n-sided prism mesh.
+
+    The prism has a regular n-gon cross-section with circumscribed radius
+    *radius*, extruded along the Y axis from -height/2 to +height/2.
+
+    Args:
+        output_path: Output STL file path.
+        radius: Circumscribed radius of the cross-section polygon (default 1.0).
+        height: Prism height along Y axis (default 2.0).
+        segments: Number of sides / vertices of the polygon cross-section
+            (default 6 → hexagonal prism).
+
+    Returns:
+        Path to the output file.
+    """
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    half_h = height / 2
+
+    for i in range(segments):
+        theta1 = (i / segments) * 2 * np.pi
+        theta2 = ((i + 1) / segments) * 2 * np.pi
+
+        x1 = radius * np.cos(theta1)
+        z1 = radius * np.sin(theta1)
+        x2 = radius * np.cos(theta2)
+        z2 = radius * np.sin(theta2)
+
+        # Outward normal for this rectangular side face (perpendicular to the edge)
+        mid_theta = (theta1 + theta2) / 2
+        n = [float(np.cos(mid_theta)), 0.0, float(np.sin(mid_theta))]
+
+        # Side rectangle (two triangles)
+        verts_list.extend(
+            [
+                [x1, -half_h, z1],
+                [x2, -half_h, z2],
+                [x1, half_h, z1],
+                [x2, -half_h, z2],
+                [x2, half_h, z2],
+                [x1, half_h, z1],
+            ]
+        )
+        normals_list.extend([n, n, n, n, n, n])
+
+        # Bottom cap triangles (fan from origin)
+        verts_list.extend([[x2, -half_h, z2], [x1, -half_h, z1], [0.0, -half_h, 0.0]])
+        normals_list.extend(
+            [[0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0]]
+        )
+
+        # Top cap triangles (fan from origin)
+        verts_list.extend([[x1, half_h, z1], [x2, half_h, z2], [0.0, half_h, 0.0]])
+        normals_list.extend([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]])
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def create_hemisphere(
+    output_path: str,
+    radius: float = 1.0,
+    segments: int = 32,
+) -> str:
+    """Creates a hemisphere mesh (upper half of a sphere plus a flat circular base).
+
+    The dome extends from y=0 (flat base) to y=radius (apex).  The flat
+    disc at y=0 closes the shape to form a watertight solid.  This matches
+    the Y-up axis convention used by the other primitive generators.
+
+    Args:
+        output_path: Output STL file path.
+        radius: Hemisphere radius (default 1.0).
+        segments: Number of latitude and longitude subdivisions (default 32).
+
+    Returns:
+        Path to the output file.
+    """
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    hemi_segs = max(segments // 2, 2)
+
+    # Dome surface: phi from 0 (top, y=radius) to π/2 (equator, y=0).
+    # Y-up parametrisation:  x = r*sin(φ)*cos(θ),  y = r*cos(φ),  z = r*sin(φ)*sin(θ)
+    for i in range(hemi_segs):
+        phi1 = (i / hemi_segs) * (np.pi / 2)
+        phi2 = ((i + 1) / hemi_segs) * (np.pi / 2)
+
+        for j in range(segments):
+            theta1 = (j / segments) * 2 * np.pi
+            theta2 = ((j + 1) / segments) * 2 * np.pi
+
+            def _pt(phi: float, theta: float) -> list[float]:
+                return [
+                    float(radius * np.sin(phi) * np.cos(theta)),
+                    float(radius * np.cos(phi)),
+                    float(radius * np.sin(phi) * np.sin(theta)),
+                ]
+
+            p1 = _pt(phi1, theta1)
+            p2 = _pt(phi1, theta2)
+            p3 = _pt(phi2, theta2)
+            p4 = _pt(phi2, theta1)
+
+            # Normals equal the normalised position vector (sphere surface)
+            n1 = _normalize(p1)
+            n2 = _normalize(p2)
+            n3 = _normalize(p3)
+            n4 = _normalize(p4)
+
+            verts_list.extend([p1, p2, p3, p1, p3, p4])
+            normals_list.extend([n1, n2, n3, n1, n3, n4])
+
+    # Flat circular base at y=0 (the equator), normal points in −Y direction.
+    for j in range(segments):
+        theta1 = (j / segments) * 2 * np.pi
+        theta2 = ((j + 1) / segments) * 2 * np.pi
+
+        x1 = float(radius * np.cos(theta1))
+        z1 = float(radius * np.sin(theta1))
+        x2 = float(radius * np.cos(theta2))
+        z2 = float(radius * np.sin(theta2))
+
+        # Winding: outer1 → outer2 → centre so normal points in −Y direction
+        verts_list.extend([[x1, 0.0, z1], [x2, 0.0, z2], [0.0, 0.0, 0.0]])
+        normals_list.extend(
+            [[0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0]]
+        )
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def create_wedge(
+    output_path: str,
+    width: float = 1.0,
+    height: float = 1.0,
+    depth: float = 1.0,
+) -> str:
+    """Creates a right-triangular wedge (triangular prism) mesh.
+
+    The wedge has a right-triangle cross-section in the XY plane:
+    the right-angle corner is at the origin, width extends along +X and
+    height along +Y.  The prism is extruded symmetrically along ±Z by
+    depth/2.
+
+    Args:
+        output_path: Output STL file path.
+        width: Extent along the X axis (default 1.0).
+        height: Extent along the Y axis (default 1.0).
+        depth: Extent along the Z axis (default 1.0).
+
+    Returns:
+        Path to the output file.
+    """
+    hw = width / 2
+    hh = height / 2
+    hd = depth / 2
+
+    # 6 vertices
+    v = [
+        [-hw, -hh, -hd],  # 0: bottom-left front
+        [hw, -hh, -hd],   # 1: bottom-right front
+        [-hw, hh, -hd],   # 2: top-left front
+        [-hw, -hh, hd],   # 3: bottom-left back
+        [hw, -hh, hd],    # 4: bottom-right back
+        [-hw, hh, hd],    # 5: top-left back
+    ]
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    # Bottom face (y = -hh): 0,1,4,3 – normal [0,-1,0]
+    for tri in [[v[0], v[1], v[4]], [v[0], v[4], v[3]]]:
+        verts_list.extend(tri)
+        normals_list.extend([[0.0, -1.0, 0.0]] * 3)
+
+    # Left face (x = -hw): 0,3,5,2 – normal [-1,0,0]
+    for tri in [[v[0], v[3], v[5]], [v[0], v[5], v[2]]]:
+        verts_list.extend(tri)
+        normals_list.extend([[-1.0, 0.0, 0.0]] * 3)
+
+    # Hypotenuse face (slanted, from top-left to bottom-right):
+    # vertices 1,2,5,4; compute outward normal
+    # Edge in XY: from (hw,-hh) to (-hw,hh), direction (-width, height, 0)
+    # Normal perpendicular to that in XY and perpendicular to Z: (height, width, 0) normalised
+    slope_n = _normalize([float(height), float(width), 0.0])
+    for tri in [[v[1], v[2], v[5]], [v[1], v[5], v[4]]]:
+        verts_list.extend(tri)
+        normals_list.extend([slope_n] * 3)
+
+    # Front face (z = -hd): 0,2,1 – normal [0,0,-1]
+    verts_list.extend([v[0], v[2], v[1]])
+    normals_list.extend([[0.0, 0.0, -1.0]] * 3)
+
+    # Back face (z = +hd): 3,4,5 – normal [0,0,+1]
+    verts_list.extend([v[3], v[4], v[5]])
+    normals_list.extend([[0.0, 0.0, 1.0]] * 3)
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def shear_stl(
+    path: str,
+    output_path: str,
+    xy: float = 0.0,
+    xz: float = 0.0,
+    yx: float = 0.0,
+    yz: float = 0.0,
+    zx: float = 0.0,
+    zy: float = 0.0,
+) -> str:
+    """Applies a shear transformation to the mesh.
+
+    The shear matrix is::
+
+        M = [[1,  xy, xz],
+             [yx,  1, yz],
+             [zx, zy,  1]]
+
+    Each parameter names which axis is shifted by how many units per unit
+    along which other axis (e.g. *xy* shifts X by *xy* units for every
+    unit along Y).
+
+    Normals are transformed by the inverse-transpose of M to preserve
+    geometric correctness.
+
+    Args:
+        path: Input STL file path.
+        output_path: Output STL file path.
+        xy: X shear factor along Y (default 0.0).
+        xz: X shear factor along Z (default 0.0).
+        yx: Y shear factor along X (default 0.0).
+        yz: Y shear factor along Z (default 0.0).
+        zx: Z shear factor along X (default 0.0).
+        zy: Z shear factor along Y (default 0.0).
+
+    Returns:
+        Path to the output file.
+    """
+    mesh = read_stl_file(path)
+
+    shear_matrix = np.array(
+        [[1.0, xy, xz], [yx, 1.0, yz], [zx, zy, 1.0]], dtype=np.float64
+    )
+
+    mesh.vertices = (mesh.vertices.astype(np.float64) @ shear_matrix.T).astype(
+        np.float32
+    )
+
+    # Transform normals by the inverse-transpose so they remain perpendicular
+    inv_t = np.linalg.inv(shear_matrix).T
+    normals_f64 = mesh.normals.astype(np.float64) @ inv_t.T
+    # Re-normalise each normal row
+    norms = np.linalg.norm(normals_f64, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    mesh.normals = (normals_f64 / norms).astype(np.float32)
+
+    mesh.bounding_box = _compute_bounding_box(mesh.vertices)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
 def _build_mesh_from_quads(
     vertices: list[list[float]], normals: list[list[float]]
 ) -> MeshData:

@@ -825,7 +825,154 @@ def create_mcp_server() -> fastmcp.FastMCP:
 
         return _core.array_circular(path, output_path, count, axis)
 
-    @mcp.resource("stl://{filepath}")
+    @mcp.tool()
+    def create_pyramid(
+        output_path: str,
+        base_radius: float = 1.0,
+        height: float = 2.0,
+        segments: int = 4,
+    ) -> str:
+        """Creates a regular pyramid mesh.
+
+        The pyramid has a regular n-sided polygon base at y=-height/2 and
+        a single apex at y=+height/2.
+
+        Args:
+            output_path: Output STL file path.
+            base_radius: Circumscribed radius of the base polygon (default 1.0).
+            height: Distance from base to apex (default 2.0).
+            segments: Number of base polygon sides (default 4 → square base).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_pyramid("pyramid.stl", base_radius=1.0, height=2.0)
+            "pyramid.stl"
+        """
+        return _core.create_pyramid(output_path, base_radius, height, segments)
+
+    @mcp.tool()
+    def create_prism(
+        output_path: str,
+        radius: float = 1.0,
+        height: float = 2.0,
+        segments: int = 6,
+    ) -> str:
+        """Creates a regular n-sided prism mesh.
+
+        The prism has a regular n-gon cross-section with the given circumscribed
+        radius, extruded along Y from -height/2 to +height/2.
+
+        Args:
+            output_path: Output STL file path.
+            radius: Circumscribed radius of the cross-section (default 1.0).
+            height: Prism height along Y (default 2.0).
+            segments: Number of polygon sides (default 6 → hexagonal prism).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_prism("hexprism.stl", radius=1.0, height=2.0, segments=6)
+            "hexprism.stl"
+        """
+        return _core.create_prism(output_path, radius, height, segments)
+
+    @mcp.tool()
+    def create_hemisphere(
+        output_path: str,
+        radius: float = 1.0,
+        segments: int = 32,
+    ) -> str:
+        """Creates a hemisphere mesh (upper half of a sphere with a flat base).
+
+        The dome covers y ≥ 0.  A flat disc at y=0 closes the solid.
+
+        Args:
+            output_path: Output STL file path.
+            radius: Hemisphere radius (default 1.0).
+            segments: Number of latitude/longitude subdivisions (default 32).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_hemisphere("dome.stl", radius=1.5)
+            "dome.stl"
+        """
+        return _core.create_hemisphere(output_path, radius, segments)
+
+    @mcp.tool()
+    def create_wedge(
+        output_path: str,
+        width: float = 1.0,
+        height: float = 1.0,
+        depth: float = 1.0,
+    ) -> str:
+        """Creates a right-triangular wedge (triangular prism) mesh.
+
+        The right-angle corner sits at the origin; width extends along X,
+        height along Y, and the prism is extruded symmetrically along ±Z
+        by depth/2.
+
+        Args:
+            output_path: Output STL file path.
+            width: Extent along X (default 1.0).
+            height: Extent along Y (default 1.0).
+            depth: Extent along Z (default 1.0).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_wedge("wedge.stl", width=2.0, height=1.0, depth=3.0)
+            "wedge.stl"
+        """
+        return _core.create_wedge(output_path, width, height, depth)
+
+    @mcp.tool()
+    def shear_stl(
+        path: str,
+        output_path: str,
+        xy: float = 0.0,
+        xz: float = 0.0,
+        yx: float = 0.0,
+        yz: float = 0.0,
+        zx: float = 0.0,
+        zy: float = 0.0,
+    ) -> str:
+        """Applies a shear transformation to the mesh.
+
+        Each parameter shifts one axis by a given factor per unit along another
+        axis (e.g. xy shifts X by xy units for every unit along Y).
+
+        Args:
+            path: Input STL file path.
+            output_path: Output STL file path.
+            xy: X shear along Y (default 0.0).
+            xz: X shear along Z (default 0.0).
+            yx: Y shear along X (default 0.0).
+            yz: Y shear along Z (default 0.0).
+            zx: Z shear along X (default 0.0).
+            zy: Z shear along Y (default 0.0).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            FileNotFoundError: If the input file does not exist.
+
+        Example:
+            >>> shear_stl("cube.stl", "sheared.stl", xy=0.5)
+            "sheared.stl"
+        """
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"STL file not found: {path}")
+
+        return _core.shear_stl(path, output_path, xy, xz, yx, yz, zx, zy)
+
+
     def get_stl_info(filepath: str) -> dict[str, object]:
         """Resource URI to get mesh information for an STL file.
 

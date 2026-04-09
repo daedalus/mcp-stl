@@ -30,15 +30,39 @@ mcp-name: io.github.daedalus/mcp-stl
 - **translate_stl**: Translate (move) the mesh by specified X, Y, Z offsets
 - **rotate_stl**: Rotate the mesh around X, Y, or Z axis by a given angle in degrees
 - **scale_stl**: Scale the mesh by specified X, Y, Z factors
+- **shear_stl**: Apply a shear transformation (shift one axis per unit along another)
+- **mirror_stl**: Mirror (reflect) the mesh across the plane perpendicular to a given axis
+- **rotate_stl_axis**: Rotate the mesh around an arbitrary axis vector (Rodrigues' formula)
+- **combine_stl**: Merge multiple STL files into one
+- **array_linear**: Create N copies of the mesh spaced by a fixed X/Y/Z offset
+- **array_circular**: Create N copies of the mesh at equal angular intervals around an axis
 
 ### Primitives
 
 - **create_cube**: Create a cube mesh
+- **create_box**: Create a rectangular box (cuboid) with independent width/height/depth
 - **create_sphere**: Create a sphere mesh
 - **create_cylinder**: Create a cylinder mesh
 - **create_cone**: Create a cone mesh
 - **create_torus**: Create a torus (donut) mesh
-- **create_plane**: Create a plane mesh
+- **create_plane**: Create a flat plane mesh
+- **create_capsule**: Create a capsule (cylinder with hemispherical end caps)
+- **create_ellipsoid**: Create an ellipsoid with independent radii on each axis
+- **create_frustum**: Create a frustum (truncated cone)
+- **create_tube**: Create a hollow cylinder (tube/pipe)
+- **create_pyramid**: Create a regular n-sided pyramid
+- **create_prism**: Create a regular n-sided prism (e.g. hexagonal prism)
+- **create_hemisphere**: Create a hemisphere (dome with flat circular base)
+- **create_wedge**: Create a right-triangular wedge (triangular prism)
+
+### Engine-Design Shapes
+
+- **create_gear**: Create a spur gear mesh (configurable module, teeth, pressure angle)
+- **create_spring**: Create a helical coil spring
+- **create_connecting_rod**: Create a connecting rod with big/small-end bores
+- **create_crankshaft**: Create an N-throw crankshaft
+- **create_valve**: Create a poppet valve (stem + head disc)
+- **create_camshaft_lobe**: Create an eccentric cam lobe with cosine nose profile
 
 ## Usage
 
