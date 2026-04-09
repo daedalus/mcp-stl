@@ -23,18 +23,23 @@ from mcp_stl._core import (
     create_ellipsoid,
     create_frustum,
     create_gear,
+    create_hemisphere,
     create_plane,
+    create_prism,
+    create_pyramid,
     create_sphere,
     create_spring,
     create_torus,
     create_tube,
     create_valve,
+    create_wedge,
     get_mesh_info,
     mirror_stl,
     read_stl_file,
     rotate_stl,
     rotate_stl_axis,
     scale_stl,
+    shear_stl,
     translate_stl,
     write_stl,
 )
@@ -1185,3 +1190,240 @@ def test_array_circular_invalid_count_raises(tmp_path: Path) -> None:
         array_circular(str(src), str(dst), 0)
 
 
+# ---------------------------------------------------------------------------
+# New basic geometric shapes
+# ---------------------------------------------------------------------------
+
+
+def test_create_pyramid_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "pyramid.stl"
+
+    result = create_pyramid(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_pyramid_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "pyramid_dim.stl"
+
+    create_pyramid(str(output_path), base_radius=2.0, height=4.0, segments=4)
+
+    mesh = read_stl_file(str(output_path))
+    # Height should span from -height/2 to +height/2 along Y
+    height_span = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    assert abs(height_span - 4.0) < 0.01
+    # Base radius sets the X/Z extent
+    x_extent = (mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]) / 2
+    assert abs(x_extent - 2.0) < 0.01
+
+
+def test_create_pyramid_triangular_base(tmp_path: Path) -> None:
+    output_path = tmp_path / "tetrahedron.stl"
+
+    create_pyramid(str(output_path), base_radius=1.0, height=2.0, segments=3)
+
+    mesh = read_stl_file(str(output_path))
+    # 3-sided pyramid: 3 side faces + 3 bottom triangles = 6 faces
+    assert mesh.face_count == 6
+
+
+def test_create_pyramid_square_base_face_count(tmp_path: Path) -> None:
+    output_path = tmp_path / "square_pyramid.stl"
+
+    create_pyramid(str(output_path), segments=4)
+
+    mesh = read_stl_file(str(output_path))
+    # 4-sided pyramid: 4 side faces + 4 bottom triangles = 8 faces
+    assert mesh.face_count == 8
+
+
+def test_create_prism_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "prism.stl"
+
+    result = create_prism(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_prism_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "prism_dim.stl"
+
+    create_prism(str(output_path), radius=1.0, height=3.0, segments=6)
+
+    mesh = read_stl_file(str(output_path))
+    # Height along Y should equal 3.0
+    height_span = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    assert abs(height_span - 3.0) < 0.01
+
+
+def test_create_prism_triangular(tmp_path: Path) -> None:
+    output_path = tmp_path / "tri_prism.stl"
+
+    create_prism(str(output_path), radius=1.0, height=2.0, segments=3)
+
+    mesh = read_stl_file(str(output_path))
+    # Triangular prism: 3 side rects (×2 tris each) + top + bottom (3 tris each) = 12 faces
+    assert mesh.face_count == 12
+
+
+def test_create_prism_hexagonal_face_count(tmp_path: Path) -> None:
+    output_path = tmp_path / "hex_prism.stl"
+
+    create_prism(str(output_path), segments=6)
+
+    mesh = read_stl_file(str(output_path))
+    # Hexagonal prism: 6 sides (×2) + top (6 tris) + bottom (6 tris) = 24 faces
+    assert mesh.face_count == 24
+
+
+def test_create_hemisphere_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "hemisphere.stl"
+
+    result = create_hemisphere(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_hemisphere_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "hemisphere_dim.stl"
+
+    create_hemisphere(str(output_path), radius=2.0, segments=16)
+
+    mesh = read_stl_file(str(output_path))
+    # Flat base at y=0, dome apex at y=radius
+    assert abs(mesh.bounding_box["y"][0]) < 0.01
+    assert abs(mesh.bounding_box["y"][1] - 2.0) < 0.05
+    # X and Z should span ±radius
+    x_half = (mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]) / 2
+    assert abs(x_half - 2.0) < 0.05
+
+
+def test_create_hemisphere_custom_params(tmp_path: Path) -> None:
+    output_path = tmp_path / "hemisphere_custom.stl"
+
+    create_hemisphere(str(output_path), radius=0.5, segments=8)
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+    assert abs(mesh.bounding_box["y"][1] - 0.5) < 0.05
+
+
+def test_create_wedge_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "wedge.stl"
+
+    result = create_wedge(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_wedge_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "wedge_dim.stl"
+
+    create_wedge(str(output_path), width=4.0, height=2.0, depth=6.0)
+
+    mesh = read_stl_file(str(output_path))
+    x_span = mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]
+    y_span = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    z_span = mesh.bounding_box["z"][1] - mesh.bounding_box["z"][0]
+    assert abs(x_span - 4.0) < 0.01
+    assert abs(y_span - 2.0) < 0.01
+    assert abs(z_span - 6.0) < 0.01
+
+
+def test_create_wedge_face_count(tmp_path: Path) -> None:
+    output_path = tmp_path / "wedge_faces.stl"
+
+    create_wedge(str(output_path))
+
+    mesh = read_stl_file(str(output_path))
+    # 5 faces: bottom rect (2 tris) + left rect (2 tris) + hypotenuse rect (2 tris)
+    # + front tri (1) + back tri (1) = 8 triangles
+    assert mesh.face_count == 8
+
+
+# ---------------------------------------------------------------------------
+# New transformation: shear_stl
+# ---------------------------------------------------------------------------
+
+
+def test_shear_stl_default_no_op(sample_binary_stl: Path, tmp_path: Path) -> None:
+    output_path = tmp_path / "shear_noop.stl"
+
+    shear_stl(str(sample_binary_stl), str(output_path))
+
+    original = read_stl_file(str(sample_binary_stl))
+    result = read_stl_file(str(output_path))
+    np.testing.assert_array_almost_equal(result.vertices, original.vertices, decimal=5)
+
+
+def test_shear_stl_xy(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "sheared_xy.stl"
+
+    create_cube(str(src), size=1.0)
+    shear_stl(str(src), str(dst), xy=0.5)
+
+    original = read_stl_file(str(src))
+    result = read_stl_file(str(dst))
+
+    # X range should be wider after shear
+    orig_x_span = original.bounding_box["x"][1] - original.bounding_box["x"][0]
+    new_x_span = result.bounding_box["x"][1] - result.bounding_box["x"][0]
+    assert new_x_span > orig_x_span
+
+    # Y and Z dimensions should be unchanged
+    assert abs(
+        (result.bounding_box["y"][1] - result.bounding_box["y"][0])
+        - (original.bounding_box["y"][1] - original.bounding_box["y"][0])
+    ) < 0.01
+
+
+def test_shear_stl_xz(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "sheared_xz.stl"
+
+    create_cube(str(src), size=1.0)
+    shear_stl(str(src), str(dst), xz=1.0)
+
+    original = read_stl_file(str(src))
+    result = read_stl_file(str(dst))
+
+    # X range should be wider after shearing X by Z
+    orig_x_span = original.bounding_box["x"][1] - original.bounding_box["x"][0]
+    new_x_span = result.bounding_box["x"][1] - result.bounding_box["x"][0]
+    assert new_x_span > orig_x_span
+
+
+def test_shear_stl_face_count_preserved(sample_binary_stl: Path, tmp_path: Path) -> None:
+    output_path = tmp_path / "shear_faces.stl"
+
+    original = read_stl_file(str(sample_binary_stl))
+    shear_stl(str(sample_binary_stl), str(output_path), yx=0.3, zy=0.2)
+    result = read_stl_file(str(output_path))
+
+    assert result.face_count == original.face_count
+
+
+def test_shear_stl_output_path_returned(sample_binary_stl: Path, tmp_path: Path) -> None:
+    output_path = tmp_path / "shear_return.stl"
+
+    result = shear_stl(str(sample_binary_stl), str(output_path), zx=0.1)
+
+    assert result == str(output_path)
+    assert output_path.exists()
