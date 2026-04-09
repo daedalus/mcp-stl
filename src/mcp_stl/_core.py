@@ -1232,6 +1232,580 @@ def _add_tube_verts(
         norms.extend([[0.0, 1.0, 0.0]] * 6)
 
 
+# ─────────────────────────── airplane / helicopter shapes ────────────────────
+
+
+def _naca_profile(
+    chord: float,
+    thickness_ratio: float,
+    n_pts: int,
+) -> list[tuple[float, float]]:
+    """Returns (x, y) points for a NACA 4-digit symmetric airfoil.
+
+    The profile traces a closed loop: top surface from the leading edge
+    (x=0) to the trailing edge (x=chord), then the bottom surface back to
+    the leading edge.  Cosine spacing is used for better resolution near
+    the leading and trailing edges.
+
+    Args:
+        chord: Chord length.
+        thickness_ratio: Maximum thickness as a fraction of chord (e.g. 0.12
+            for a NACA 0012 profile).
+        n_pts: Number of sample points per surface half (top + bottom).
+
+    Returns:
+        List of (x, y) tuples forming a closed, ordered polygon.
+    """
+    t = thickness_ratio
+
+    def _yt(xn: float) -> float:
+        return (
+            5.0
+            * t
+            * chord
+            * (
+                0.2969 * float(np.sqrt(max(xn, 0.0)))
+                - 0.1260 * xn
+                - 0.3516 * xn**2
+                + 0.2843 * xn**3
+                - 0.1015 * xn**4
+            )
+        )
+
+    xs = [(1.0 - np.cos(np.pi * i / (n_pts - 1))) / 2.0 for i in range(n_pts)]
+    top: list[tuple[float, float]] = [
+        (float(x * chord), float(_yt(x))) for x in xs
+    ]
+    bottom: list[tuple[float, float]] = [
+        (float(x * chord), float(-_yt(x))) for x in reversed(xs[1:-1])
+    ]
+    return top + bottom
+
+
+def create_airfoil(
+    output_path: str,
+    chord: float = 1.0,
+    span: float = 5.0,
+    thickness_ratio: float = 0.12,
+    segments: int = 32,
+) -> str:
+    """Creates a symmetric NACA airfoil wing-section mesh.
+
+    The chord runs along the X axis (leading edge at x=0, trailing edge at
+    x=chord), thickness is along Y, and the span extrudes along Z from z=0
+    to z=span.  A ``thickness_ratio`` of 0.12 gives a NACA 0012 profile.
+
+    Suitable for wings, horizontal stabilisers, and vertical fins of
+    airplanes or helicopters.
+
+    Args:
+        output_path: Output STL file path.
+        chord: Chord length along X (default 1.0).
+        span: Wing-section span along Z (default 5.0).
+        thickness_ratio: Max thickness as a fraction of chord (default 0.12).
+        segments: Points per airfoil surface half; higher values give a
+            smoother leading edge (default 32).
+
+    Returns:
+        Path to the output file.
+
+    Example:
+        >>> create_airfoil("wing.stl", chord=1.5, span=6.0)
+        "wing.stl"
+    """
+    profile = _naca_profile(chord, thickness_ratio, segments)
+    n = len(profile)
+    cx = sum(p[0] for p in profile) / n
+    cy = sum(p[1] for p in profile) / n
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    # Side walls – extrude profile along Z
+    for i in range(n):
+        x1, y1 = profile[i]
+        x2, y2 = profile[(i + 1) % n]
+        dx = x2 - x1
+        dy = y2 - y1
+        length = float(np.sqrt(dx * dx + dy * dy))
+        if length > 1e-10:
+            nx, ny = float(dy / length), float(-dx / length)
+        else:
+            nx, ny = 0.0, 1.0
+        n_side: list[float] = [nx, ny, 0.0]
+        verts_list.extend(
+            [
+                [x1, y1, 0.0], [x2, y2, 0.0], [x1, y1, span],
+                [x2, y2, 0.0], [x2, y2, span], [x1, y1, span],
+            ]
+        )
+        normals_list.extend([n_side] * 6)
+
+    # Root cap (z = 0, normal −Z)
+    for i in range(n):
+        x1, y1 = profile[i]
+        x2, y2 = profile[(i + 1) % n]
+        verts_list.extend([[x1, y1, 0.0], [cx, cy, 0.0], [x2, y2, 0.0]])
+        normals_list.extend([[0.0, 0.0, -1.0]] * 3)
+
+    # Tip cap (z = span, normal +Z)
+    for i in range(n):
+        x1, y1 = profile[i]
+        x2, y2 = profile[(i + 1) % n]
+        verts_list.extend([[x1, y1, span], [x2, y2, span], [cx, cy, span]])
+        normals_list.extend([[0.0, 0.0, 1.0]] * 3)
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def _create_swept_blade_mesh(
+    length: float,
+    chord_root: float,
+    chord_tip: float,
+    twist_angle: float,
+    thickness_ratio: float,
+    segments: int,
+    span_segments: int,
+) -> tuple[list[list[float]], list[list[float]]]:
+    """Build vertices/normals for a tapered, twisted airfoil blade.
+
+    The blade spans along the Y axis (root at y=0, tip at y=length).
+    At each span station the cross-section is a NACA symmetric airfoil in
+    the X-Z plane, scaled by the local chord and rotated by the local twist
+    about Y.
+
+    Args:
+        length: Blade span along Y.
+        chord_root: Chord at the root (y=0).
+        chord_tip: Chord at the tip (y=length).
+        twist_angle: Total twist from root to tip in degrees.
+        thickness_ratio: NACA thickness ratio.
+        segments: Points per airfoil surface half per slice.
+        span_segments: Number of span-wise divisions.
+
+    Returns:
+        Tuple (verts_list, normals_list) ready for _build_mesh.
+    """
+    def _ring(t: float) -> list[tuple[float, float]]:
+        chord = chord_root + (chord_tip - chord_root) * t
+        twist_rad = float(np.radians(twist_angle * t))
+        profile_2d = _naca_profile(chord, thickness_ratio, segments)
+        x_offset = chord / 2.0
+        c_t = float(np.cos(twist_rad))
+        s_t = float(np.sin(twist_rad))
+        result: list[tuple[float, float]] = []
+        for px, pz in profile_2d:
+            px -= x_offset
+            rx = px * c_t - pz * s_t
+            rz = px * s_t + pz * c_t
+            result.append((float(rx), float(rz)))
+        return result
+
+    rings = [_ring(i / span_segments) for i in range(span_segments + 1)]
+    ys = [(i / span_segments) * length for i in range(span_segments + 1)]
+    n = len(rings[0])
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    # Loft between adjacent rings
+    for si in range(span_segments):
+        ring0, ring1 = rings[si], rings[si + 1]
+        y0, y1 = ys[si], ys[si + 1]
+        for i in range(n):
+            p00 = [ring0[i][0], y0, ring0[i][1]]
+            p01 = [ring0[(i + 1) % n][0], y0, ring0[(i + 1) % n][1]]
+            p10 = [ring1[i][0], y1, ring1[i][1]]
+            p11 = [ring1[(i + 1) % n][0], y1, ring1[(i + 1) % n][1]]
+            # Cross product normals for each triangle
+            e1 = [p01[j] - p00[j] for j in range(3)]
+            e2 = [p10[j] - p00[j] for j in range(3)]
+            nf0 = _normalize([
+                e1[1] * e2[2] - e1[2] * e2[1],
+                e1[2] * e2[0] - e1[0] * e2[2],
+                e1[0] * e2[1] - e1[1] * e2[0],
+            ])
+            e3 = [p11[j] - p01[j] for j in range(3)]
+            e4 = [p10[j] - p01[j] for j in range(3)]
+            nf1 = _normalize([
+                e3[1] * e4[2] - e3[2] * e4[1],
+                e3[2] * e4[0] - e3[0] * e4[2],
+                e3[0] * e4[1] - e3[1] * e4[0],
+            ])
+            verts_list.extend([p00, p01, p10])
+            normals_list.extend([nf0, nf0, nf0])
+            verts_list.extend([p01, p11, p10])
+            normals_list.extend([nf1, nf1, nf1])
+
+    # Root cap (y = 0, normal −Y)
+    ring0 = rings[0]
+    cx0 = sum(p[0] for p in ring0) / n
+    cz0 = sum(p[1] for p in ring0) / n
+    for i in range(n):
+        x1, z1 = ring0[i]
+        x2, z2 = ring0[(i + 1) % n]
+        verts_list.extend([[x1, 0.0, z1], [cx0, 0.0, cz0], [x2, 0.0, z2]])
+        normals_list.extend([[0.0, -1.0, 0.0]] * 3)
+
+    # Tip cap (y = length, normal +Y)
+    ring_tip = rings[-1]
+    cx1 = sum(p[0] for p in ring_tip) / n
+    cz1 = sum(p[1] for p in ring_tip) / n
+    for i in range(n):
+        x1, z1 = ring_tip[i]
+        x2, z2 = ring_tip[(i + 1) % n]
+        verts_list.extend([[x1, length, z1], [x2, length, z2], [cx1, length, cz1]])
+        normals_list.extend([[0.0, 1.0, 0.0]] * 3)
+
+    return verts_list, normals_list
+
+
+def create_propeller_blade(
+    output_path: str,
+    length: float = 5.0,
+    chord_root: float = 0.5,
+    chord_tip: float = 0.15,
+    twist_angle: float = 30.0,
+    thickness_ratio: float = 0.12,
+    segments: int = 16,
+    span_segments: int = 20,
+) -> str:
+    """Creates a propeller or helicopter rotor blade mesh.
+
+    The blade spans along the Y axis from y=0 (root/hub face) to y=length
+    (tip).  The cross-section is a NACA symmetric airfoil in the X-Z plane,
+    scaled by the local chord and progressively rotated about Y by
+    *twist_angle* from root to tip.
+
+    Use ``array_circular`` to arrange multiple blades into a full propeller or
+    rotor disc.
+
+    Args:
+        output_path: Output STL file path.
+        length: Blade span along Y (default 5.0).
+        chord_root: Chord length at the root (default 0.5).
+        chord_tip: Chord length at the tip (default 0.15).
+        twist_angle: Total twist from root to tip in degrees (default 30.0).
+        thickness_ratio: NACA airfoil thickness ratio (default 0.12).
+        segments: Points per airfoil surface half per slice (default 16).
+        span_segments: Number of span-wise divisions (default 20).
+
+    Returns:
+        Path to the output file.
+
+    Example:
+        >>> create_propeller_blade("blade.stl", length=4.0, twist_angle=25.0)
+        "blade.stl"
+    """
+    verts_list, normals_list = _create_swept_blade_mesh(
+        length, chord_root, chord_tip, twist_angle, thickness_ratio,
+        segments, span_segments,
+    )
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def create_turbine_blade(
+    output_path: str,
+    span: float = 1.5,
+    chord_root: float = 0.4,
+    chord_tip: float = 0.25,
+    twist_angle: float = 45.0,
+    thickness_ratio: float = 0.10,
+    segments: int = 16,
+    span_segments: int = 16,
+) -> str:
+    """Creates a gas-turbine compressor or fan blade mesh.
+
+    Geometry is identical to a propeller blade (NACA airfoil profile, tapered
+    chord, and progressive twist) but with defaults suited to turbomachinery:
+    shorter span, more aggressive twist, and a thinner profile.
+
+    Use ``array_circular`` to arrange blades into a full compressor or fan stage.
+
+    Args:
+        output_path: Output STL file path.
+        span: Blade span along Y (default 1.5).
+        chord_root: Chord at the root (default 0.4).
+        chord_tip: Chord at the tip (default 0.25).
+        twist_angle: Total twist from root to tip in degrees (default 45.0).
+        thickness_ratio: NACA airfoil thickness ratio (default 0.10).
+        segments: Points per airfoil surface half per slice (default 16).
+        span_segments: Number of span-wise divisions (default 16).
+
+    Returns:
+        Path to the output file.
+
+    Example:
+        >>> create_turbine_blade("tblade.stl", span=1.2, twist_angle=50.0)
+        "tblade.stl"
+    """
+    verts_list, normals_list = _create_swept_blade_mesh(
+        span, chord_root, chord_tip, twist_angle, thickness_ratio,
+        segments, span_segments,
+    )
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def create_piston(
+    output_path: str,
+    bore: float = 1.0,
+    height: float = 1.2,
+    wall_thickness: float = 0.1,
+    crown_height: float = 0.3,
+    segments: int = 32,
+) -> str:
+    """Creates a hollow piston mesh.
+
+    The piston axis is aligned along Y.  The crown (solid top) sits at
+    y = +height/2 and has thickness *crown_height*.  The cylindrical skirt
+    extends from y = −height/2 up to the base of the crown; the interior is
+    open at the bottom, as on a real piston.
+
+    Combine with ``create_connecting_rod`` and ``create_crankshaft`` to model a
+    piston engine.
+
+    Args:
+        output_path: Output STL file path.
+        bore: Outer piston diameter (default 1.0).
+        height: Total piston height along Y (default 1.2).
+        wall_thickness: Cylindrical wall thickness (default 0.1).
+        crown_height: Axial thickness of the solid crown (default 0.3).
+        segments: Number of radial segments (default 32).
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        ValueError: If wall_thickness >= bore/2, or crown_height >= height.
+
+    Example:
+        >>> create_piston("piston.stl", bore=0.8, height=1.0)
+        "piston.stl"
+    """
+    outer_r = bore / 2.0
+    inner_r = outer_r - wall_thickness
+    if inner_r <= 0.0:
+        raise ValueError("wall_thickness must be less than bore/2")
+    if crown_height >= height:
+        raise ValueError("crown_height must be less than total height")
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    top = height / 2.0
+    bottom = -height / 2.0
+    crown_base = top - crown_height
+
+    # Outer cylindrical surface – full height, outward normals
+    _add_cylinder_verts(
+        verts_list, normals_list,
+        0.0, bottom, top, 0.0,
+        outer_r, segments,
+        cap_bot=False, cap_top=False,
+    )
+
+    # Crown top face (solid disc, +Y normal)
+    for i in range(segments):
+        theta1 = (i / segments) * 2.0 * np.pi
+        theta2 = ((i + 1) / segments) * 2.0 * np.pi
+        x2, z2 = outer_r * float(np.cos(theta2)), outer_r * float(np.sin(theta2))
+        x1, z1 = outer_r * float(np.cos(theta1)), outer_r * float(np.sin(theta1))
+        verts_list.extend([[x2, top, z2], [x1, top, z1], [0.0, top, 0.0]])
+        normals_list.extend([[0.0, 1.0, 0.0]] * 3)
+
+    # Inner cylindrical surface (hollow skirt, inward normals)
+    for i in range(segments):
+        theta1 = (i / segments) * 2.0 * np.pi
+        theta2 = ((i + 1) / segments) * 2.0 * np.pi
+        ix1, iz1 = inner_r * float(np.cos(theta1)), inner_r * float(np.sin(theta1))
+        ix2, iz2 = inner_r * float(np.cos(theta2)), inner_r * float(np.sin(theta2))
+        ni1 = _normalize([-ix1, 0.0, -iz1])
+        ni2 = _normalize([-ix2, 0.0, -iz2])
+        # Reversed winding for inward-facing normals
+        verts_list.extend(
+            [
+                [ix1, crown_base, iz1], [ix2, crown_base, iz2], [ix1, bottom, iz1],
+                [ix2, crown_base, iz2], [ix2, bottom, iz2], [ix1, bottom, iz1],
+            ]
+        )
+        normals_list.extend([ni1, ni2, ni1, ni2, ni2, ni1])
+
+    # Crown underside (annular ring at crown_base, −Y normal)
+    for i in range(segments):
+        theta1 = (i / segments) * 2.0 * np.pi
+        theta2 = ((i + 1) / segments) * 2.0 * np.pi
+        ox1, oz1 = outer_r * float(np.cos(theta1)), outer_r * float(np.sin(theta1))
+        ox2, oz2 = outer_r * float(np.cos(theta2)), outer_r * float(np.sin(theta2))
+        ix1, iz1 = inner_r * float(np.cos(theta1)), inner_r * float(np.sin(theta1))
+        ix2, iz2 = inner_r * float(np.cos(theta2)), inner_r * float(np.sin(theta2))
+        verts_list.extend(
+            [
+                [ox1, crown_base, oz1], [ox2, crown_base, oz2], [ix2, crown_base, iz2],
+                [ox1, crown_base, oz1], [ix2, crown_base, iz2], [ix1, crown_base, iz1],
+            ]
+        )
+        normals_list.extend([[0.0, -1.0, 0.0]] * 6)
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def create_turbine_disk(
+    output_path: str,
+    disk_radius: float = 2.0,
+    bore_radius: float = 0.5,
+    disk_thickness: float = 0.4,
+    web_thickness: float = 0.15,
+    hub_radius: float = 0.9,
+    segments: int = 64,
+) -> str:
+    """Creates a turbine disk (rotor wheel blank) mesh.
+
+    The disk has a stepped cross-section typical of gas-turbine rotors:
+
+    * **Hub** region (bore to hub_radius): full *disk_thickness*.
+    * **Web** region (hub_radius to disk_radius): reduced *web_thickness*.
+
+    The axis is aligned along Y.  Turbine blades are attached around the
+    outer rim using ``create_turbine_blade`` followed by ``array_circular``.
+
+    Args:
+        output_path: Output STL file path.
+        disk_radius: Outer rim radius (default 2.0).
+        bore_radius: Inner bore radius (default 0.5).
+        disk_thickness: Full axial thickness of the hub (default 0.4).
+        web_thickness: Reduced axial thickness of the web (default 0.15).
+        hub_radius: Radial boundary between hub and web (default 0.9).
+        segments: Number of radial segments (default 64).
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        ValueError: If bore_radius >= hub_radius, hub_radius >= disk_radius,
+            or web_thickness >= disk_thickness.
+
+    Example:
+        >>> create_turbine_disk("disk.stl", disk_radius=2.0, bore_radius=0.4)
+        "disk.stl"
+    """
+    if bore_radius >= hub_radius:
+        raise ValueError("bore_radius must be less than hub_radius")
+    if hub_radius >= disk_radius:
+        raise ValueError("hub_radius must be less than disk_radius")
+    if web_thickness >= disk_thickness:
+        raise ValueError("web_thickness must be less than disk_thickness")
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    t_full = disk_thickness / 2.0
+    t_web = web_thickness / 2.0
+
+    for i in range(segments):
+        theta1 = (i / segments) * 2.0 * np.pi
+        theta2 = ((i + 1) / segments) * 2.0 * np.pi
+        c1, s1 = float(np.cos(theta1)), float(np.sin(theta1))
+        c2, s2 = float(np.cos(theta2)), float(np.sin(theta2))
+
+        bx1, bz1 = bore_radius * c1, bore_radius * s1
+        bx2, bz2 = bore_radius * c2, bore_radius * s2
+        hx1, hz1 = hub_radius * c1, hub_radius * s1
+        hx2, hz2 = hub_radius * c2, hub_radius * s2
+        dx1, dz1 = disk_radius * c1, disk_radius * s1
+        dx2, dz2 = disk_radius * c2, disk_radius * s2
+
+        ni1 = _normalize([-bx1, 0.0, -bz1])
+        ni2 = _normalize([-bx2, 0.0, -bz2])
+        nh1 = _normalize([hx1, 0.0, hz1])
+        nh2 = _normalize([hx2, 0.0, hz2])
+        nd1 = _normalize([dx1, 0.0, dz1])
+        nd2 = _normalize([dx2, 0.0, dz2])
+
+        # 1. Bore inner surface (inward normals, full hub thickness)
+        verts_list.extend(
+            [
+                [bx1, t_full, bz1], [bx2, t_full, bz2], [bx1, -t_full, bz1],
+                [bx2, t_full, bz2], [bx2, -t_full, bz2], [bx1, -t_full, bz1],
+            ]
+        )
+        normals_list.extend([ni1, ni2, ni1, ni2, ni2, ni1])
+
+        # 2. Hub shoulder outer wall – top (+t_web → +t_full, outward)
+        verts_list.extend(
+            [
+                [hx1, t_web, hz1], [hx2, t_web, hz2], [hx1, t_full, hz1],
+                [hx2, t_web, hz2], [hx2, t_full, hz2], [hx1, t_full, hz1],
+            ]
+        )
+        normals_list.extend([nh1, nh2, nh1, nh2, nh2, nh1])
+
+        # 3. Hub shoulder outer wall – bottom (−t_full → −t_web, outward)
+        verts_list.extend(
+            [
+                [hx1, -t_full, hz1], [hx2, -t_full, hz2], [hx1, -t_web, hz1],
+                [hx2, -t_full, hz2], [hx2, -t_web, hz2], [hx1, -t_web, hz1],
+            ]
+        )
+        normals_list.extend([nh1, nh2, nh1, nh2, nh2, nh1])
+
+        # 4. Rim outer surface (outward, web thickness)
+        verts_list.extend(
+            [
+                [dx1, -t_web, dz1], [dx2, -t_web, dz2], [dx1, t_web, dz1],
+                [dx2, -t_web, dz2], [dx2, t_web, dz2], [dx1, t_web, dz1],
+            ]
+        )
+        normals_list.extend([nd1, nd2, nd1, nd2, nd2, nd1])
+
+        # 5. Hub top annular ring (+Y, bore→hub_r at y=+t_full)
+        verts_list.extend(
+            [
+                [hx1, t_full, hz1], [bx2, t_full, bz2], [hx2, t_full, hz2],
+                [hx1, t_full, hz1], [bx1, t_full, bz1], [bx2, t_full, bz2],
+            ]
+        )
+        normals_list.extend([[0.0, 1.0, 0.0]] * 6)
+
+        # 6. Web top annular ring (+Y, hub_r→disk_r at y=+t_web)
+        verts_list.extend(
+            [
+                [dx1, t_web, dz1], [hx2, t_web, hz2], [dx2, t_web, dz2],
+                [dx1, t_web, dz1], [hx1, t_web, hz1], [hx2, t_web, hz2],
+            ]
+        )
+        normals_list.extend([[0.0, 1.0, 0.0]] * 6)
+
+        # 7. Hub bottom annular ring (−Y, bore→hub_r at y=−t_full)
+        verts_list.extend(
+            [
+                [hx1, -t_full, hz1], [hx2, -t_full, hz2], [bx2, -t_full, bz2],
+                [hx1, -t_full, hz1], [bx2, -t_full, bz2], [bx1, -t_full, bz1],
+            ]
+        )
+        normals_list.extend([[0.0, -1.0, 0.0]] * 6)
+
+        # 8. Web bottom annular ring (−Y, hub_r→disk_r at y=−t_web)
+        verts_list.extend(
+            [
+                [dx1, -t_web, dz1], [dx2, -t_web, dz2], [hx2, -t_web, hz2],
+                [dx1, -t_web, dz1], [hx2, -t_web, hz2], [hx1, -t_web, hz1],
+            ]
+        )
+        normals_list.extend([[0.0, -1.0, 0.0]] * 6)
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
 # ─────────────────────────── engine shapes ───────────────────────────────────
 
 
@@ -2270,6 +2844,105 @@ def shear_stl(
     norms = np.where(norms == 0, 1.0, norms)
     mesh.normals = (normals_f64 / norms).astype(np.float32)
 
+    mesh.bounding_box = _compute_bounding_box(mesh.vertices)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def twist_stl(
+    path: str,
+    output_path: str,
+    angle: float,
+    axis: str = "y",
+) -> str:
+    """Applies a twist (torsion) transformation to the mesh.
+
+    Each vertex is rotated about the given axis by an angle proportional to
+    its coordinate along that axis.  The twist is zero at the minimum extent
+    of the mesh along *axis* and reaches *angle* degrees at the maximum
+    extent.
+
+    Useful for adding geometric twist to propeller blades, turbine blades,
+    and swept wing sections.
+
+    Args:
+        path: Input STL file path.
+        output_path: Output STL file path.
+        angle: Total twist angle in degrees applied over the full extent of
+            the mesh along *axis*.
+        axis: Twist axis ('x', 'y', or 'z'; default 'y').
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        FileNotFoundError: If the input file does not exist.
+        ValueError: If axis is invalid.
+
+    Example:
+        >>> twist_stl("blade.stl", "twisted.stl", 30.0, axis="y")
+        "twisted.stl"
+    """
+    if axis.lower() not in ("x", "y", "z"):
+        raise ValueError(f"Invalid axis: {axis!r}. Must be 'x', 'y', or 'z'")
+
+    mesh = read_stl_file(path)
+    axis_idx = {"x": 0, "y": 1, "z": 2}[axis.lower()]
+
+    verts = mesh.vertices.astype(np.float64)
+    norms = mesh.normals.astype(np.float64)
+
+    coords = verts[:, axis_idx]
+    coord_min = float(coords.min())
+    coord_max = float(coords.max())
+    coord_range = coord_max - coord_min
+
+    if coord_range < 1e-10:
+        # Mesh has no extent along the axis; write unchanged
+        write_stl_mesh(mesh, output_path, "binary")
+        return output_path
+
+    # Per-vertex twist angles
+    t_vert = (coords - coord_min) / coord_range
+    vert_angles = float(np.radians(angle)) * t_vert
+    c_v = np.cos(vert_angles)
+    s_v = np.sin(vert_angles)
+
+    if axis_idx == 0:  # X axis: rotate Y-Z
+        v1, v2 = verts[:, 1].copy(), verts[:, 2].copy()
+        verts[:, 1] = v1 * c_v - v2 * s_v
+        verts[:, 2] = v1 * s_v + v2 * c_v
+    elif axis_idx == 1:  # Y axis: rotate X-Z (right-hand rule)
+        v1, v2 = verts[:, 0].copy(), verts[:, 2].copy()
+        verts[:, 0] = v1 * c_v + v2 * s_v
+        verts[:, 2] = -v1 * s_v + v2 * c_v
+    else:  # Z axis: rotate X-Y
+        v1, v2 = verts[:, 0].copy(), verts[:, 1].copy()
+        verts[:, 0] = v1 * c_v - v2 * s_v
+        verts[:, 1] = v1 * s_v + v2 * c_v
+
+    # Per-face twist angles (use average vertex position for each face)
+    face_coords = (coords[0::3] + coords[1::3] + coords[2::3]) / 3.0
+    t_face = (face_coords - coord_min) / coord_range
+    face_angles = float(np.radians(angle)) * t_face
+    c_f = np.cos(face_angles)
+    s_f = np.sin(face_angles)
+
+    if axis_idx == 0:
+        n1, n2 = norms[:, 1].copy(), norms[:, 2].copy()
+        norms[:, 1] = n1 * c_f - n2 * s_f
+        norms[:, 2] = n1 * s_f + n2 * c_f
+    elif axis_idx == 1:
+        n1, n2 = norms[:, 0].copy(), norms[:, 2].copy()
+        norms[:, 0] = n1 * c_f + n2 * s_f
+        norms[:, 2] = -n1 * s_f + n2 * c_f
+    else:
+        n1, n2 = norms[:, 0].copy(), norms[:, 1].copy()
+        norms[:, 0] = n1 * c_f - n2 * s_f
+        norms[:, 1] = n1 * s_f + n2 * c_f
+
+    mesh.vertices = verts.astype(np.float32)
+    mesh.normals = norms.astype(np.float32)
     mesh.bounding_box = _compute_bounding_box(mesh.vertices)
     write_stl_mesh(mesh, output_path, "binary")
     return output_path

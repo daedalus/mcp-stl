@@ -12,6 +12,7 @@ from mcp_stl._core import (
     array_circular,
     array_linear,
     combine_stl,
+    create_airfoil,
     create_box,
     create_camshaft_lobe,
     create_capsule,
@@ -24,13 +25,17 @@ from mcp_stl._core import (
     create_frustum,
     create_gear,
     create_hemisphere,
+    create_piston,
     create_plane,
     create_prism,
+    create_propeller_blade,
     create_pyramid,
     create_sphere,
     create_spring,
     create_torus,
     create_tube,
+    create_turbine_blade,
+    create_turbine_disk,
     create_valve,
     create_wedge,
     get_mesh_info,
@@ -41,6 +46,7 @@ from mcp_stl._core import (
     scale_stl,
     shear_stl,
     translate_stl,
+    twist_stl,
     write_stl,
 )
 
@@ -1427,3 +1433,366 @@ def test_shear_stl_output_path_returned(sample_binary_stl: Path, tmp_path: Path)
 
     assert result == str(output_path)
     assert output_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Airplane / helicopter shapes – create_airfoil
+# ---------------------------------------------------------------------------
+
+
+def test_create_airfoil_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "airfoil.stl"
+
+    result = create_airfoil(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_airfoil_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "airfoil_dim.stl"
+
+    create_airfoil(str(output_path), chord=2.0, span=8.0, thickness_ratio=0.12)
+
+    mesh = read_stl_file(str(output_path))
+    # Chord along X: 0 to 2.0
+    x_span = mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]
+    assert abs(x_span - 2.0) < 0.05
+    # Span along Z: 0 to 8.0
+    z_span = mesh.bounding_box["z"][1] - mesh.bounding_box["z"][0]
+    assert abs(z_span - 8.0) < 0.01
+
+
+def test_create_airfoil_thickness(tmp_path: Path) -> None:
+    output_path = tmp_path / "airfoil_thick.stl"
+
+    # NACA 0012: max thickness ≈ 12 % of chord = 0.12 (total Y span ≈ 0.12)
+    create_airfoil(str(output_path), chord=1.0, span=1.0, thickness_ratio=0.12, segments=64)
+
+    mesh = read_stl_file(str(output_path))
+    y_span = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    assert y_span > 0.0
+    assert y_span < 0.16  # must be less than 16% chord
+
+
+def test_create_airfoil_thin_profile(tmp_path: Path) -> None:
+    p6 = tmp_path / "naca6.stl"
+    p12 = tmp_path / "naca12.stl"
+
+    create_airfoil(str(p6), chord=1.0, span=1.0, thickness_ratio=0.06)
+    create_airfoil(str(p12), chord=1.0, span=1.0, thickness_ratio=0.12)
+
+    m6 = read_stl_file(str(p6))
+    m12 = read_stl_file(str(p12))
+
+    y6 = m6.bounding_box["y"][1] - m6.bounding_box["y"][0]
+    y12 = m12.bounding_box["y"][1] - m12.bounding_box["y"][0]
+    assert y6 < y12
+
+
+# ---------------------------------------------------------------------------
+# create_propeller_blade
+# ---------------------------------------------------------------------------
+
+
+def test_create_propeller_blade_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "blade.stl"
+
+    result = create_propeller_blade(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_propeller_blade_length(tmp_path: Path) -> None:
+    output_path = tmp_path / "blade_len.stl"
+
+    create_propeller_blade(str(output_path), length=4.0, span_segments=8)
+
+    mesh = read_stl_file(str(output_path))
+    y_span = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    assert abs(y_span - 4.0) < 0.05
+
+
+def test_create_propeller_blade_tapered(tmp_path: Path) -> None:
+    """Blade with chord_tip < chord_root should be narrower at the tip."""
+    output_path = tmp_path / "tapered.stl"
+
+    create_propeller_blade(
+        str(output_path),
+        length=3.0,
+        chord_root=0.6,
+        chord_tip=0.1,
+        twist_angle=20.0,
+        segments=8,
+        span_segments=4,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_propeller_blade_twist_changes_geometry(tmp_path: Path) -> None:
+    """Twisted and untwisted blades should differ in bounding-box Z extent."""
+    p0 = tmp_path / "no_twist.stl"
+    p45 = tmp_path / "twisted.stl"
+
+    create_propeller_blade(str(p0), length=2.0, twist_angle=0.0, segments=8, span_segments=4)
+    create_propeller_blade(str(p45), length=2.0, twist_angle=45.0, segments=8, span_segments=4)
+
+    m0 = read_stl_file(str(p0))
+    m45 = read_stl_file(str(p45))
+
+    assert m0.face_count == m45.face_count
+    # A 45° twist rotates chord into Z, so the Z extent grows noticeably
+    z0 = m0.bounding_box["z"][1] - m0.bounding_box["z"][0]
+    z45 = m45.bounding_box["z"][1] - m45.bounding_box["z"][0]
+    assert z45 > z0 + 1e-3
+
+
+# ---------------------------------------------------------------------------
+# create_turbine_blade
+# ---------------------------------------------------------------------------
+
+
+def test_create_turbine_blade_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "tblade.stl"
+
+    result = create_turbine_blade(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_turbine_blade_span(tmp_path: Path) -> None:
+    output_path = tmp_path / "tblade_span.stl"
+
+    create_turbine_blade(str(output_path), span=2.0, span_segments=8)
+
+    mesh = read_stl_file(str(output_path))
+    y_span = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    assert abs(y_span - 2.0) < 0.05
+
+
+def test_create_turbine_blade_custom_params(tmp_path: Path) -> None:
+    output_path = tmp_path / "tblade_custom.stl"
+
+    create_turbine_blade(
+        str(output_path),
+        span=1.0,
+        chord_root=0.3,
+        chord_tip=0.2,
+        twist_angle=60.0,
+        thickness_ratio=0.08,
+        segments=8,
+        span_segments=8,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+# ---------------------------------------------------------------------------
+# create_piston
+# ---------------------------------------------------------------------------
+
+
+def test_create_piston_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "piston.stl"
+
+    result = create_piston(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_piston_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "piston_dim.stl"
+
+    create_piston(str(output_path), bore=2.0, height=2.4, wall_thickness=0.2,
+                  crown_height=0.6, segments=16)
+
+    mesh = read_stl_file(str(output_path))
+    # Height along Y = 2.4
+    y_span = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    assert abs(y_span - 2.4) < 0.01
+    # Outer diameter = bore
+    x_span = mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]
+    assert abs(x_span - 2.0) < 0.05
+
+
+def test_create_piston_invalid_wall_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "piston_bad.stl"
+
+    with pytest.raises(ValueError, match="wall_thickness must be less than bore/2"):
+        create_piston(str(output_path), bore=1.0, wall_thickness=0.6)
+
+
+def test_create_piston_invalid_crown_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "piston_bad2.stl"
+
+    with pytest.raises(ValueError, match="crown_height must be less than total height"):
+        create_piston(str(output_path), height=1.0, crown_height=1.5)
+
+
+# ---------------------------------------------------------------------------
+# create_turbine_disk
+# ---------------------------------------------------------------------------
+
+
+def test_create_turbine_disk_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "disk.stl"
+
+    result = create_turbine_disk(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_turbine_disk_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "disk_dim.stl"
+
+    create_turbine_disk(
+        str(output_path),
+        disk_radius=3.0,
+        bore_radius=0.6,
+        disk_thickness=0.6,
+        web_thickness=0.2,
+        hub_radius=1.2,
+        segments=32,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    # Outer diameter should span ≈ 2 * disk_radius
+    x_span = mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]
+    assert abs(x_span - 6.0) < 0.05
+    # Thickness along Y (full hub thickness = 0.6)
+    y_span = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    assert abs(y_span - 0.6) < 0.01
+
+
+def test_create_turbine_disk_invalid_bore_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "disk_bad.stl"
+
+    with pytest.raises(ValueError, match="bore_radius must be less than hub_radius"):
+        create_turbine_disk(str(output_path), bore_radius=1.5, hub_radius=1.0)
+
+
+def test_create_turbine_disk_invalid_hub_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "disk_bad2.stl"
+
+    with pytest.raises(ValueError, match="hub_radius must be less than disk_radius"):
+        create_turbine_disk(str(output_path), hub_radius=3.0, disk_radius=2.0)
+
+
+def test_create_turbine_disk_invalid_web_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "disk_bad3.stl"
+
+    with pytest.raises(ValueError, match="web_thickness must be less than disk_thickness"):
+        create_turbine_disk(str(output_path), disk_thickness=0.3, web_thickness=0.5)
+
+
+# ---------------------------------------------------------------------------
+# twist_stl
+# ---------------------------------------------------------------------------
+
+
+def test_twist_stl_zero_angle_no_op(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "twist0.stl"
+
+    create_cube(str(src))
+    twist_stl(str(src), str(dst), angle=0.0)
+
+    original = read_stl_file(str(src))
+    result = read_stl_file(str(dst))
+    np.testing.assert_array_almost_equal(result.vertices, original.vertices, decimal=5)
+
+
+def test_twist_stl_output_path_returned(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "twist_out.stl"
+
+    create_cube(str(src))
+    result = twist_stl(str(src), str(dst), angle=45.0, axis="y")
+
+    assert result == str(dst)
+    assert dst.exists()
+
+
+def test_twist_stl_face_count_preserved(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "twist_faces.stl"
+
+    create_cube(str(src))
+    original = read_stl_file(str(src))
+    twist_stl(str(src), str(dst), angle=90.0)
+    result = read_stl_file(str(dst))
+
+    assert result.face_count == original.face_count
+
+
+def test_twist_stl_changes_geometry(tmp_path: Path) -> None:
+    """A 90° Y-twist exchanges the wide X extent into the Z direction."""
+    src = tmp_path / "box.stl"
+    dst = tmp_path / "twisted_box.stl"
+
+    # Flat box: wide in X (2.0), thin in Z (0.5), tall in Y (4.0)
+    create_box(str(src), width=2.0, height=4.0, depth=0.5)
+    original = read_stl_file(str(src))
+    twist_stl(str(src), str(dst), angle=90.0, axis="y")
+    result = read_stl_file(str(dst))
+
+    orig_z = original.bounding_box["z"][1] - original.bounding_box["z"][0]
+    new_z = result.bounding_box["z"][1] - result.bounding_box["z"][0]
+    # At the twisted tip, the wide X (2.0) is rotated into Z → Z span ≫ 0.5
+    assert new_z > orig_z + 0.5
+
+
+def test_twist_stl_x_axis(tmp_path: Path) -> None:
+    src = tmp_path / "cyl.stl"
+    dst = tmp_path / "twisted_x.stl"
+
+    create_cylinder(str(src), radius=0.5, height=2.0, segments=8)
+    result_path = twist_stl(str(src), str(dst), angle=180.0, axis="x")
+
+    assert result_path == str(dst)
+    mesh = read_stl_file(str(dst))
+    assert mesh.face_count > 0
+
+
+def test_twist_stl_z_axis(tmp_path: Path) -> None:
+    src = tmp_path / "cyl_z.stl"
+    dst = tmp_path / "twisted_z.stl"
+
+    create_cylinder(str(src), radius=0.5, height=2.0, segments=8)
+    result_path = twist_stl(str(src), str(dst), angle=45.0, axis="z")
+
+    assert result_path == str(dst)
+    mesh = read_stl_file(str(dst))
+    assert mesh.face_count > 0
+
+
+def test_twist_stl_invalid_axis_raises(tmp_path: Path) -> None:
+    src = tmp_path / "cube.stl"
+    dst = tmp_path / "bad_twist.stl"
+
+    create_cube(str(src))
+
+    with pytest.raises(ValueError, match="Invalid axis"):
+        twist_stl(str(src), str(dst), angle=30.0, axis="w")
