@@ -972,6 +972,248 @@ def create_mcp_server() -> fastmcp.FastMCP:
 
         return _core.shear_stl(path, output_path, xy, xz, yx, yz, zx, zy)
 
+    @mcp.tool()
+    def twist_stl(
+        path: str,
+        output_path: str,
+        angle: float,
+        axis: str = "y",
+    ) -> str:
+        """Applies a twist (torsion) transformation to the mesh.
+
+        Each vertex is rotated about *axis* by an amount proportional to its
+        position along that axis.  The twist is zero at the minimum extent of
+        the mesh and reaches *angle* degrees at the maximum extent.
+
+        Useful for adding geometric pitch to propeller blades, turbine blades,
+        and swept wing sections created with create_airfoil.
+
+        Args:
+            path: Input STL file path.
+            output_path: Output STL file path.
+            angle: Total twist in degrees over the full extent along *axis*.
+            axis: Twist axis ('x', 'y', or 'z'; default 'y').
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            FileNotFoundError: If the input file does not exist.
+            ValueError: If axis is invalid.
+
+        Example:
+            >>> twist_stl("wing.stl", "twisted_wing.stl", 5.0, axis="z")
+            "twisted_wing.stl"
+        """
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"STL file not found: {path}")
+
+        return _core.twist_stl(path, output_path, angle, axis)
+
+    @mcp.tool()
+    def create_airfoil(
+        output_path: str,
+        chord: float = 1.0,
+        span: float = 5.0,
+        thickness_ratio: float = 0.12,
+        segments: int = 32,
+    ) -> str:
+        """Creates a symmetric NACA airfoil wing-section mesh.
+
+        The chord runs along X (leading edge at x=0, trailing edge at
+        x=chord), thickness is along Y, and the span extrudes along Z from
+        z=0 to z=span.  A thickness_ratio of 0.12 gives a NACA 0012 profile.
+
+        Suitable for wings, horizontal stabilisers, and vertical fins of
+        airplanes or helicopters.
+
+        Args:
+            output_path: Output STL file path.
+            chord: Chord length along X (default 1.0).
+            span: Wing-section span along Z (default 5.0).
+            thickness_ratio: Max thickness as fraction of chord (default 0.12).
+            segments: Points per airfoil surface half (default 32).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_airfoil("wing.stl", chord=1.5, span=6.0)
+            "wing.stl"
+        """
+        return _core.create_airfoil(output_path, chord, span, thickness_ratio, segments)
+
+    @mcp.tool()
+    def create_propeller_blade(
+        output_path: str,
+        length: float = 5.0,
+        chord_root: float = 0.5,
+        chord_tip: float = 0.15,
+        twist_angle: float = 30.0,
+        thickness_ratio: float = 0.12,
+        segments: int = 16,
+        span_segments: int = 20,
+    ) -> str:
+        """Creates a propeller or helicopter rotor blade mesh.
+
+        The blade spans along Y (root at y=0, tip at y=length).  The
+        cross-section is a NACA symmetric airfoil in the X-Z plane, scaled
+        by the local chord and progressively rotated about Y by twist_angle
+        from root to tip.
+
+        Use array_circular to arrange multiple blades into a full propeller
+        or rotor disc.
+
+        Args:
+            output_path: Output STL file path.
+            length: Blade span along Y (default 5.0).
+            chord_root: Chord length at the root (default 0.5).
+            chord_tip: Chord length at the tip (default 0.15).
+            twist_angle: Total twist from root to tip in degrees (default 30.0).
+            thickness_ratio: NACA airfoil thickness ratio (default 0.12).
+            segments: Points per airfoil surface half per slice (default 16).
+            span_segments: Number of span-wise divisions (default 20).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_propeller_blade("blade.stl", length=4.0, twist_angle=25.0)
+            "blade.stl"
+        """
+        return _core.create_propeller_blade(
+            output_path, length, chord_root, chord_tip, twist_angle,
+            thickness_ratio, segments, span_segments,
+        )
+
+    @mcp.tool()
+    def create_turbine_blade(
+        output_path: str,
+        span: float = 1.5,
+        chord_root: float = 0.4,
+        chord_tip: float = 0.25,
+        twist_angle: float = 45.0,
+        thickness_ratio: float = 0.10,
+        segments: int = 16,
+        span_segments: int = 16,
+    ) -> str:
+        """Creates a gas-turbine compressor or fan blade mesh.
+
+        Geometry is identical to a propeller blade (NACA airfoil profile,
+        tapered chord, and progressive twist) but with defaults suited to
+        turbomachinery: shorter span, more aggressive twist, and thinner
+        profile.
+
+        Use array_circular to arrange blades into a full compressor or fan
+        stage.
+
+        Args:
+            output_path: Output STL file path.
+            span: Blade span along Y (default 1.5).
+            chord_root: Chord at the root (default 0.4).
+            chord_tip: Chord at the tip (default 0.25).
+            twist_angle: Total twist from root to tip in degrees (default 45.0).
+            thickness_ratio: NACA airfoil thickness ratio (default 0.10).
+            segments: Points per airfoil surface half per slice (default 16).
+            span_segments: Number of span-wise divisions (default 16).
+
+        Returns:
+            Path to the output file.
+
+        Example:
+            >>> create_turbine_blade("tblade.stl", span=1.2, twist_angle=50.0)
+            "tblade.stl"
+        """
+        return _core.create_turbine_blade(
+            output_path, span, chord_root, chord_tip, twist_angle,
+            thickness_ratio, segments, span_segments,
+        )
+
+    @mcp.tool()
+    def create_piston(
+        output_path: str,
+        bore: float = 1.0,
+        height: float = 1.2,
+        wall_thickness: float = 0.1,
+        crown_height: float = 0.3,
+        segments: int = 32,
+    ) -> str:
+        """Creates a hollow piston mesh.
+
+        The piston axis is aligned along Y.  The crown (solid top) is at
+        y = +height/2 with axial thickness crown_height.  The cylindrical
+        skirt extends from y = -height/2 to the crown base; the interior is
+        open at the bottom.
+
+        Combine with create_connecting_rod and create_crankshaft to model a
+        piston engine.
+
+        Args:
+            output_path: Output STL file path.
+            bore: Outer piston diameter (default 1.0).
+            height: Total piston height along Y (default 1.2).
+            wall_thickness: Cylindrical wall thickness (default 0.1).
+            crown_height: Axial thickness of the solid crown (default 0.3).
+            segments: Number of radial segments (default 32).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If wall_thickness >= bore/2 or crown_height >= height.
+
+        Example:
+            >>> create_piston("piston.stl", bore=0.8, height=1.0)
+            "piston.stl"
+        """
+        return _core.create_piston(
+            output_path, bore, height, wall_thickness, crown_height, segments
+        )
+
+    @mcp.tool()
+    def create_turbine_disk(
+        output_path: str,
+        disk_radius: float = 2.0,
+        bore_radius: float = 0.5,
+        disk_thickness: float = 0.4,
+        web_thickness: float = 0.15,
+        hub_radius: float = 0.9,
+        segments: int = 64,
+    ) -> str:
+        """Creates a turbine disk (rotor wheel blank) mesh.
+
+        The disk has a stepped cross-section typical of gas-turbine rotors:
+        a hub region (bore to hub_radius) at full disk_thickness, and a web
+        region (hub_radius to disk_radius) at the reduced web_thickness.
+
+        The axis is aligned along Y.  Attach turbine blades using
+        create_turbine_blade followed by array_circular.
+
+        Args:
+            output_path: Output STL file path.
+            disk_radius: Outer rim radius (default 2.0).
+            bore_radius: Inner bore radius (default 0.5).
+            disk_thickness: Full axial thickness of the hub (default 0.4).
+            web_thickness: Reduced axial thickness of the web (default 0.15).
+            hub_radius: Radial boundary between hub and web (default 0.9).
+            segments: Number of radial segments (default 64).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If bore_radius >= hub_radius, hub_radius >=
+                disk_radius, or web_thickness >= disk_thickness.
+
+        Example:
+            >>> create_turbine_disk("disk.stl", disk_radius=2.0, bore_radius=0.4)
+            "disk.stl"
+        """
+        return _core.create_turbine_disk(
+            output_path, disk_radius, bore_radius, disk_thickness,
+            web_thickness, hub_radius, segments,
+        )
+
     @mcp.resource("stl://{filepath}")
     def get_stl_info(filepath: str) -> dict[str, object]:
         """Resource URI to get mesh information for an STL file.
