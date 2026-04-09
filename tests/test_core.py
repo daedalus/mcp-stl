@@ -13,6 +13,7 @@ from mcp_stl._core import (
     array_linear,
     combine_stl,
     create_airfoil,
+    create_bell_nozzle,
     create_box,
     create_camshaft_lobe,
     create_capsule,
@@ -25,10 +26,12 @@ from mcp_stl._core import (
     create_frustum,
     create_gear,
     create_hemisphere,
+    create_injector_plate,
     create_piston,
     create_plane,
     create_prism,
     create_propeller_blade,
+    create_pump_housing,
     create_pyramid,
     create_sphere,
     create_spring,
@@ -1796,3 +1799,236 @@ def test_twist_stl_invalid_axis_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Invalid axis"):
         twist_stl(str(src), str(dst), angle=30.0, axis="w")
+
+
+# ---------------------------------------------------------------------------
+# RD-180 rocket engine shapes
+# ---------------------------------------------------------------------------
+
+
+def test_create_bell_nozzle_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "nozzle.stl"
+
+    result = create_bell_nozzle(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_bell_nozzle_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "nozzle_dim.stl"
+
+    throat_r = 0.1
+    exit_r = 0.6
+    chamber_r = 0.3
+    chamber_l = 0.2
+    conv_l = 0.15
+    bell_l = 0.8
+
+    create_bell_nozzle(
+        str(output_path),
+        throat_radius=throat_r,
+        exit_radius=exit_r,
+        chamber_radius=chamber_r,
+        chamber_length=chamber_l,
+        convergent_length=conv_l,
+        bell_length=bell_l,
+        wall_thickness=0.02,
+        segments=16,
+        profile_points=8,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+    total_length = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    expected_length = chamber_l + conv_l + bell_l
+    assert abs(total_length - expected_length) < 0.05
+
+    # Exit radius sets max X/Z extent (outer = exit_r + wall_thickness)
+    max_r = (mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]) / 2
+    assert abs(max_r - (exit_r + 0.02)) < 0.05
+
+
+def test_create_bell_nozzle_throat_smaller_than_exit(tmp_path: Path) -> None:
+    output_path = tmp_path / "nozzle_ratio.stl"
+
+    create_bell_nozzle(
+        str(output_path),
+        throat_radius=0.1,
+        exit_radius=0.5,
+        chamber_radius=0.25,
+        segments=8,
+        profile_points=6,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+    # Chamber section spans chamber_radius; exit spans exit_radius.
+    # So max X extent should be larger than min X extent near throat.
+    x_max = mesh.bounding_box["x"][1]
+    assert x_max > 0.5
+
+
+def test_create_bell_nozzle_invalid_throat_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_nozzle.stl"
+
+    with pytest.raises(ValueError, match="throat_radius must be less than chamber_radius"):
+        create_bell_nozzle(str(output_path), throat_radius=0.5, chamber_radius=0.3)
+
+
+def test_create_bell_nozzle_invalid_exit_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_nozzle2.stl"
+
+    with pytest.raises(ValueError, match="throat_radius must be less than exit_radius"):
+        create_bell_nozzle(str(output_path), throat_radius=0.5, chamber_radius=0.6, exit_radius=0.3)
+
+
+def test_create_bell_nozzle_invalid_wall_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_nozzle3.stl"
+
+    with pytest.raises(ValueError, match="wall_thickness must be less than throat_radius"):
+        create_bell_nozzle(
+            str(output_path),
+            throat_radius=0.1,
+            exit_radius=0.5,
+            chamber_radius=0.3,
+            wall_thickness=0.2,
+        )
+
+
+def test_create_injector_plate_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "injector.stl"
+
+    result = create_injector_plate(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_injector_plate_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "injector_dim.stl"
+
+    create_injector_plate(
+        str(output_path),
+        radius=0.5,
+        thickness=0.06,
+        num_elements=12,
+        element_radius=0.02,
+        pattern_radius=0.3,
+        segments=16,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+    # Plate base at y=0; stubs protrude to y = 2 * thickness
+    y_min = mesh.bounding_box["y"][0]
+    y_max = mesh.bounding_box["y"][1]
+    assert abs(y_min) < 0.01
+    assert y_max > 0.06  # stubs add height above plate thickness
+
+    # Outer radius of plate sets X/Z extent
+    x_span = mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]
+    assert abs(x_span - 2 * 0.5) < 0.05
+
+
+def test_create_injector_plate_custom_elements(tmp_path: Path) -> None:
+    out_6 = tmp_path / "inj_6.stl"
+    out_24 = tmp_path / "inj_24.stl"
+
+    create_injector_plate(str(out_6), num_elements=6)
+    create_injector_plate(str(out_24), num_elements=24)
+
+    m6 = read_stl_file(str(out_6))
+    m24 = read_stl_file(str(out_24))
+
+    # More elements means more faces
+    assert m24.face_count > m6.face_count
+
+
+def test_create_injector_plate_invalid_pattern_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_injector.stl"
+
+    with pytest.raises(ValueError, match="pattern_radius"):
+        create_injector_plate(
+            str(output_path),
+            radius=0.3,
+            pattern_radius=0.28,
+            element_radius=0.05,
+        )
+
+
+def test_create_pump_housing_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "pump.stl"
+
+    result = create_pump_housing(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_pump_housing_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "pump_dim.stl"
+
+    create_pump_housing(
+        str(output_path),
+        bore_radius=0.2,
+        housing_radius=0.5,
+        housing_height=0.3,
+        outlet_radius=0.1,
+        outlet_length=0.2,
+        segments=16,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+    # Housing height along Y
+    y_span = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    assert abs(y_span - 0.3) < 0.05
+
+    # Outlet pipe extends to x = housing_radius + outlet_length = 0.7
+    x_max = mesh.bounding_box["x"][1]
+    assert abs(x_max - (0.5 + 0.2)) < 0.05
+
+
+def test_create_pump_housing_outlet_extends_in_x(tmp_path: Path) -> None:
+    output_path = tmp_path / "pump_outlet.stl"
+
+    create_pump_housing(
+        str(output_path),
+        bore_radius=0.15,
+        housing_radius=0.4,
+        housing_height=0.2,
+        outlet_radius=0.08,
+        outlet_length=0.3,
+        segments=16,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    # Outlet extends to x = 0.4 + 0.3 = 0.7 in +X direction
+    assert abs(mesh.bounding_box["x"][1] - 0.7) < 0.05
+
+
+def test_create_pump_housing_invalid_bore_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_pump.stl"
+
+    with pytest.raises(ValueError, match="bore_radius must be less than housing_radius"):
+        create_pump_housing(str(output_path), bore_radius=0.8, housing_radius=0.5)
+
+
+def test_create_pump_housing_invalid_outlet_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_pump2.stl"
+
+    with pytest.raises(ValueError, match="outlet_radius must be less than housing_radius"):
+        create_pump_housing(str(output_path), outlet_radius=0.7, housing_radius=0.5)

@@ -1214,6 +1214,162 @@ def create_mcp_server() -> fastmcp.FastMCP:
             web_thickness, hub_radius, segments,
         )
 
+    @mcp.tool()
+    def create_bell_nozzle(
+        output_path: str,
+        throat_radius: float = 0.15,
+        exit_radius: float = 0.75,
+        chamber_radius: float = 0.35,
+        chamber_length: float = 0.3,
+        convergent_length: float = 0.2,
+        bell_length: float = 1.0,
+        wall_thickness: float = 0.04,
+        segments: int = 32,
+        profile_points: int = 16,
+    ) -> str:
+        """Creates a bell nozzle (convergent-divergent de Laval nozzle) mesh.
+
+        The nozzle axis is aligned along Y. y=0 is the combustion-chamber
+        inlet; y = chamber_length + convergent_length + bell_length is the
+        nozzle exit plane.
+
+        Profile sections:
+        - Combustion chamber: cylindrical bore at chamber_radius.
+        - Convergent section: cosine-blend taper from chamber_radius down to
+          throat_radius.
+        - Divergent bell: quarter-sine flare from throat_radius out to
+          exit_radius, giving the characteristic bell contour.
+
+        The mesh is a hollow thin-walled structure (outer surface, inner bore,
+        and two annular end caps). Use combine_stl to assemble two nozzles
+        with a shared combustion chamber for an RD-180 type engine.
+
+        Args:
+            output_path: Output STL file path.
+            throat_radius: Nozzle throat (minimum) radius (default 0.15).
+            exit_radius: Nozzle exit plane radius (default 0.75).
+            chamber_radius: Combustion chamber bore radius (default 0.35).
+            chamber_length: Length of cylindrical chamber section (default 0.3).
+            convergent_length: Length of the converging section (default 0.2).
+            bell_length: Length of the diverging bell section (default 1.0).
+            wall_thickness: Nozzle wall thickness (default 0.04).
+            segments: Number of circumferential segments (default 32).
+            profile_points: Axial profile points per section (default 16).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If throat_radius >= chamber_radius,
+                throat_radius >= exit_radius, or
+                wall_thickness >= throat_radius.
+
+        Example:
+            >>> create_bell_nozzle("nozzle.stl", throat_radius=0.15, exit_radius=0.75)
+            "nozzle.stl"
+        """
+        return _core.create_bell_nozzle(
+            output_path, throat_radius, exit_radius, chamber_radius,
+            chamber_length, convergent_length, bell_length,
+            wall_thickness, segments, profile_points,
+        )
+
+    @mcp.tool()
+    def create_injector_plate(
+        output_path: str,
+        radius: float = 0.35,
+        thickness: float = 0.05,
+        num_elements: int = 18,
+        element_radius: float = 0.015,
+        pattern_radius: float = 0.22,
+        segments: int = 32,
+    ) -> str:
+        """Creates a propellant injector plate mesh.
+
+        The plate is a solid flat disc with a circular array of small
+        cylindrical injector-element stubs protruding from the top face (+Y).
+        The plate axis is aligned along Y with the bottom face at y=0 and the
+        top face at y=thickness.
+
+        Suitable for the combustion-chamber injector head of liquid rocket
+        engines such as the RD-180. Use combine_stl to pair with a bell
+        nozzle and combustion chamber body.
+
+        Args:
+            output_path: Output STL file path.
+            radius: Outer radius of the plate (default 0.35).
+            thickness: Plate thickness along Y (default 0.05).
+            num_elements: Number of injector-element stubs around the ring
+                (default 18).
+            element_radius: Radius of each cylindrical injector stub (default
+                0.015).
+            pattern_radius: Radial distance from plate centre to stub
+                centreline (default 0.22).
+            segments: Circumferential segments for plate and stubs (default
+                32).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If pattern_radius + element_radius >= radius.
+
+        Example:
+            >>> create_injector_plate("injector.stl", num_elements=24)
+            "injector.stl"
+        """
+        return _core.create_injector_plate(
+            output_path, radius, thickness, num_elements,
+            element_radius, pattern_radius, segments,
+        )
+
+    @mcp.tool()
+    def create_pump_housing(
+        output_path: str,
+        bore_radius: float = 0.25,
+        housing_radius: float = 0.6,
+        housing_height: float = 0.35,
+        outlet_radius: float = 0.12,
+        outlet_length: float = 0.25,
+        segments: int = 32,
+    ) -> str:
+        """Creates a centrifugal pump housing (volute casing) mesh.
+
+        The housing is a hollow cylindrical casing (thick annular disc) with
+        the pump axis along Y. A cylindrical outlet pipe extends radially from
+        the outer casing wall in the +X direction, representing the volute
+        discharge port.
+
+        Use with create_turbine_disk and create_turbine_blade (via
+        array_circular) to build a complete turbopump stage for an RD-180
+        type engine.
+
+        Args:
+            output_path: Output STL file path.
+            bore_radius: Inner bore radius for the impeller cavity (default
+                0.25).
+            housing_radius: Outer casing radius (default 0.6).
+            housing_height: Axial height of the casing along Y (default 0.35).
+            outlet_radius: Radius of the discharge outlet pipe (default 0.12).
+            outlet_length: Length of the outlet pipe along X (default 0.25).
+            segments: Number of circumferential segments (default 32).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If bore_radius >= housing_radius or
+                outlet_radius >= housing_radius.
+
+        Example:
+            >>> create_pump_housing("pump.stl", bore_radius=0.2, housing_radius=0.5)
+            "pump.stl"
+        """
+        return _core.create_pump_housing(
+            output_path, bore_radius, housing_radius, housing_height,
+            outlet_radius, outlet_length, segments,
+        )
+
     @mcp.resource("stl://{filepath}")
     def get_stl_info(filepath: str) -> dict[str, object]:
         """Resource URI to get mesh information for an STL file.
