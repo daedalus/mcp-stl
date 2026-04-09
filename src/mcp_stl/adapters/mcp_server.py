@@ -1370,6 +1370,240 @@ def create_mcp_server() -> fastmcp.FastMCP:
             outlet_radius, outlet_length, segments,
         )
 
+    @mcp.tool()
+    def create_arch(
+        output_path: str,
+        inner_radius: float = 1.0,
+        outer_radius: float = 1.3,
+        depth: float = 0.5,
+        segments: int = 32,
+        arch_angle: float = 180.0,
+    ) -> str:
+        """Creates an architectural arch mesh.
+
+        The arch sweeps from 0° to arch_angle (default 180° = semicircular
+        arch) in the XY plane.  A 180° arch has its feet at
+        (±outer_radius, 0) and its crown at (0, outer_radius).
+
+        Essential for bridges, aqueducts, vaults, and doorways — one of
+        humanity's most transformative structural inventions.
+
+        Args:
+            output_path: Output STL file path.
+            inner_radius: Inner (soffit) radius (default 1.0).
+            outer_radius: Outer (extrados) radius (default 1.3).
+            depth: Extrusion depth along Z (default 0.5).
+            segments: Number of arc subdivisions (default 32).
+            arch_angle: Total arc sweep in degrees (default 180.0).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If inner_radius >= outer_radius or arch_angle out of
+                range (0, 360].
+
+        Example:
+            >>> create_arch("arch.stl", inner_radius=0.8, outer_radius=1.0)
+            "arch.stl"
+        """
+        return _core.create_arch(output_path, inner_radius, outer_radius, depth, segments, arch_angle)
+
+    @mcp.tool()
+    def create_bolt(
+        output_path: str,
+        shaft_radius: float = 0.2,
+        head_radius: float = 0.4,
+        shaft_length: float = 2.0,
+        head_height: float = 0.35,
+        thread_pitch: float = 0.2,
+        thread_depth: float = 0.04,
+        segments: int = 6,
+        thread_segments: int = 32,
+    ) -> str:
+        """Creates a hex bolt mesh with a threaded shaft.
+
+        The bolt axis is along Y.  The hex head occupies
+        y=0…y=head_height; the threaded shaft extends above that.
+
+        Bolts are among the most fundamental mechanical fasteners and were
+        critical to the Industrial Revolution and modern construction.
+
+        Args:
+            output_path: Output STL file path.
+            shaft_radius: Nominal shaft radius (default 0.2).
+            head_radius: Circumscribed radius of the hex head (default 0.4).
+            shaft_length: Length of the threaded shaft (default 2.0).
+            head_height: Height of the hex head (default 0.35).
+            thread_pitch: Axial distance between thread crests (default 0.2).
+            thread_depth: Radial height of thread crests (default 0.04).
+            segments: Sides of the hex head (default 6).
+            thread_segments: Circumferential segments per thread ring
+                (default 32).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If shaft_radius <= 0, head_radius <= shaft_radius,
+                shaft_length <= 0, or thread_pitch <= 0.
+
+        Example:
+            >>> create_bolt("bolt.stl", shaft_radius=0.15, shaft_length=1.5)
+            "bolt.stl"
+        """
+        return _core.create_bolt(
+            output_path, shaft_radius, head_radius, shaft_length,
+            head_height, thread_pitch, thread_depth, segments, thread_segments,
+        )
+
+    @mcp.tool()
+    def create_nut(
+        output_path: str,
+        inner_radius: float = 0.2,
+        outer_radius: float = 0.4,
+        height: float = 0.35,
+        segments: int = 6,
+        chamfer: float = 0.03,
+    ) -> str:
+        """Creates a hex nut mesh.
+
+        A regular hexagonal prism with a cylindrical bore along Y.
+
+        Pairs with create_bolt.  The threaded nut and bolt are among the
+        simplest yet most important fasteners ever devised.
+
+        Args:
+            output_path: Output STL file path.
+            inner_radius: Bore radius (default 0.2).
+            outer_radius: Circumscribed radius of the hex body (default 0.4).
+            height: Nut height along Y (default 0.35).
+            segments: Sides of the outer polygon (default 6 → hex nut).
+            chamfer: Chamfer size on bore edges (default 0.03; 0 disables).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If inner_radius >= outer_radius or height <= 0.
+
+        Example:
+            >>> create_nut("nut.stl", inner_radius=0.18, outer_radius=0.38)
+            "nut.stl"
+        """
+        return _core.create_nut(output_path, inner_radius, outer_radius, height, segments, chamfer)
+
+    @mcp.tool()
+    def create_rack(
+        output_path: str,
+        length: float = 5.0,
+        height: float = 0.5,
+        thickness: float = 0.3,
+        module: float = 0.5,
+        pressure_angle_deg: float = 20.0,
+    ) -> str:
+        """Creates a linear gear rack mesh.
+
+        A straight bar with evenly spaced teeth along the top edge,
+        aligned along the X axis.  Meshes with a spur gear to convert
+        rotary motion into linear motion (rack-and-pinion).
+
+        Args:
+            output_path: Output STL file path.
+            length: Total rack length along X (default 5.0).
+            height: Body height along Y (default 0.5).
+            thickness: Body depth along Z (default 0.3).
+            module: Gear module; tooth pitch = π × module (default 0.5).
+            pressure_angle_deg: Tooth flank pressure angle in degrees
+                (default 20.0).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If length, height, thickness, or module <= 0.
+
+        Example:
+            >>> create_rack("rack.stl", length=6.0, module=0.4)
+            "rack.stl"
+        """
+        return _core.create_rack(output_path, length, height, thickness, module, pressure_angle_deg)
+
+    @mcp.tool()
+    def create_i_beam(
+        output_path: str,
+        width: float = 0.5,
+        height: float = 1.0,
+        length: float = 5.0,
+        flange_thickness: float = 0.06,
+        web_thickness: float = 0.04,
+    ) -> str:
+        """Creates an I-beam (H-beam) structural steel section mesh.
+
+        The I-beam cross-section has two horizontal flanges connected by a
+        vertical web, extruded along the Y axis.
+
+        I-beams are the primary structural elements of modern buildings,
+        bridges, and industrial frames — indispensable for civilisation-scale
+        construction.
+
+        Args:
+            output_path: Output STL file path.
+            width: Total flange width along X (default 0.5).
+            height: Total section height along Z (default 1.0).
+            length: Beam length along Y (default 5.0).
+            flange_thickness: Thickness of each flange plate (default 0.06).
+            web_thickness: Thickness of the web plate (default 0.04).
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            ValueError: If height <= 2*flange_thickness, width <= web_thickness,
+                or length <= 0.
+
+        Example:
+            >>> create_i_beam("beam.stl", width=0.4, height=0.8, length=4.0)
+            "beam.stl"
+        """
+        return _core.create_i_beam(output_path, width, height, length, flange_thickness, web_thickness)
+
+    @mcp.tool()
+    def bend_stl(
+        path: str,
+        output_path: str,
+        angle: float,
+        bend_radius: float = 1.0,
+        axis: str = "z",
+    ) -> str:
+        """Bends a mesh along a circular arc.
+
+        Transforms the straight extent of the mesh along *axis* into a
+        circular arc of *bend_radius*.  Essential for manufacturing curved
+        pipes, arch ribs, bent beams, and swept structures.
+
+        Args:
+            path: Input STL file path.
+            output_path: Output STL file path.
+            angle: Total bending angle in degrees.
+            bend_radius: Radius of the neutral bending axis (default 1.0).
+            axis: Axis along which the mesh is swept ('x', 'y', or 'z';
+                default 'z').
+
+        Returns:
+            Path to the output file.
+
+        Raises:
+            FileNotFoundError: If the input file does not exist.
+            ValueError: If axis is invalid or bend_radius <= 0.
+
+        Example:
+            >>> bend_stl("pipe.stl", "curved_pipe.stl", angle=90.0,
+            ...          bend_radius=2.0, axis="x")
+            "curved_pipe.stl"
+        """
+        return _core.bend_stl(path, output_path, angle, bend_radius, axis)
+
     @mcp.resource("stl://{filepath}")
     def get_stl_info(filepath: str) -> dict[str, object]:
         """Resource URI to get mesh information for an STL file.

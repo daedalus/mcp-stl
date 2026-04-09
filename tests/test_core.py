@@ -11,9 +11,12 @@ from mcp_stl._core import (
     _parse_binary,
     array_circular,
     array_linear,
+    bend_stl,
     combine_stl,
     create_airfoil,
+    create_arch,
     create_bell_nozzle,
+    create_bolt,
     create_box,
     create_camshaft_lobe,
     create_capsule,
@@ -26,13 +29,16 @@ from mcp_stl._core import (
     create_frustum,
     create_gear,
     create_hemisphere,
+    create_i_beam,
     create_injector_plate,
+    create_nut,
     create_piston,
     create_plane,
     create_prism,
     create_propeller_blade,
     create_pump_housing,
     create_pyramid,
+    create_rack,
     create_sphere,
     create_spring,
     create_torus,
@@ -2032,3 +2038,369 @@ def test_create_pump_housing_invalid_outlet_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="outlet_radius must be less than housing_radius"):
         create_pump_housing(str(output_path), outlet_radius=0.7, housing_radius=0.5)
+
+
+# ---------------------------------------------------------------------------
+# Civilization-restart shapes and transformations
+# ---------------------------------------------------------------------------
+
+
+# --- create_arch ------------------------------------------------------------
+
+
+def test_create_arch_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "arch.stl"
+
+    result = create_arch(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_arch_semicircle_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "arch_dim.stl"
+    inner_r = 0.8
+    outer_r = 1.0
+    depth = 0.4
+
+    create_arch(str(output_path), inner_radius=inner_r, outer_radius=outer_r, depth=depth)
+
+    mesh = read_stl_file(str(output_path))
+    # Semicircular arch crown should reach outer_radius in Y
+    assert mesh.bounding_box["y"][1] > inner_r
+    # Z extent should match depth
+    z_span = mesh.bounding_box["z"][1] - mesh.bounding_box["z"][0]
+    assert abs(z_span - depth) < 0.05
+
+
+def test_create_arch_full_ring(tmp_path: Path) -> None:
+    output_path = tmp_path / "arch_ring.stl"
+
+    create_arch(str(output_path), arch_angle=360.0, segments=16)
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_arch_custom_angle(tmp_path: Path) -> None:
+    output_path = tmp_path / "arch_90.stl"
+
+    create_arch(str(output_path), arch_angle=90.0, segments=8)
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_arch_invalid_radii_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_arch.stl"
+
+    with pytest.raises(ValueError, match="inner_radius must be less than outer_radius"):
+        create_arch(str(output_path), inner_radius=1.5, outer_radius=1.0)
+
+
+def test_create_arch_invalid_angle_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_arch2.stl"
+
+    with pytest.raises(ValueError, match="arch_angle"):
+        create_arch(str(output_path), arch_angle=0.0)
+
+    with pytest.raises(ValueError, match="arch_angle"):
+        create_arch(str(output_path), arch_angle=400.0)
+
+
+# --- create_bolt ------------------------------------------------------------
+
+
+def test_create_bolt_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "bolt.stl"
+
+    result = create_bolt(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_bolt_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "bolt_dim.stl"
+    shaft_r = 0.1
+    head_h = 0.2
+    shaft_l = 1.5
+    head_r = 0.25
+
+    create_bolt(
+        str(output_path),
+        shaft_radius=shaft_r,
+        head_radius=head_r,
+        shaft_length=shaft_l,
+        head_height=head_h,
+        segments=6,
+        thread_segments=16,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    total_length = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    expected_length = head_h + shaft_l
+    assert abs(total_length - expected_length) < 0.05
+
+
+def test_create_bolt_thread_rings_increase_radius(tmp_path: Path) -> None:
+    output_path = tmp_path / "bolt_threads.stl"
+
+    create_bolt(
+        str(output_path),
+        shaft_radius=0.2,
+        thread_depth=0.05,
+        shaft_length=1.0,
+        thread_segments=16,
+    )
+
+    mesh = read_stl_file(str(output_path))
+    x_max = mesh.bounding_box["x"][1]
+    # x_max should be at least shaft_radius + thread_depth
+    assert x_max >= 0.2 + 0.05 - 0.01
+
+
+def test_create_bolt_invalid_shaft_radius_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_bolt.stl"
+
+    with pytest.raises(ValueError, match="shaft_radius must be positive"):
+        create_bolt(str(output_path), shaft_radius=0.0)
+
+
+def test_create_bolt_invalid_head_radius_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_bolt2.stl"
+
+    with pytest.raises(ValueError, match="head_radius must be greater than shaft_radius"):
+        create_bolt(str(output_path), shaft_radius=0.5, head_radius=0.3)
+
+
+# --- create_nut -------------------------------------------------------------
+
+
+def test_create_nut_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "nut.stl"
+
+    result = create_nut(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_nut_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "nut_dim.stl"
+    inner_r = 0.15
+    outer_r = 0.35
+    h = 0.25
+
+    create_nut(str(output_path), inner_radius=inner_r, outer_radius=outer_r, height=h)
+
+    mesh = read_stl_file(str(output_path))
+    y_span = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    assert abs(y_span - h) < 0.05
+
+    # Outer X span should match outer_radius * 2
+    x_span = mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]
+    assert abs(x_span - 2 * outer_r) < 0.05
+
+
+def test_create_nut_no_chamfer(tmp_path: Path) -> None:
+    output_path = tmp_path / "nut_flat.stl"
+
+    create_nut(str(output_path), chamfer=0.0)
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_nut_invalid_radii_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_nut.stl"
+
+    with pytest.raises(ValueError, match="inner_radius must be less than outer_radius"):
+        create_nut(str(output_path), inner_radius=0.5, outer_radius=0.3)
+
+
+def test_create_nut_invalid_height_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_nut2.stl"
+
+    with pytest.raises(ValueError, match="height must be positive"):
+        create_nut(str(output_path), height=0.0)
+
+
+# --- create_rack ------------------------------------------------------------
+
+
+def test_create_rack_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "rack.stl"
+
+    result = create_rack(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_rack_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "rack_dim.stl"
+    length = 4.0
+    height = 0.6
+    thickness = 0.3
+
+    create_rack(str(output_path), length=length, height=height, thickness=thickness, module=0.5)
+
+    mesh = read_stl_file(str(output_path))
+
+    # Length along X
+    x_span = mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]
+    assert x_span > 0
+
+    # Teeth protrude above body — top Y > height/2
+    assert mesh.bounding_box["y"][1] > height / 2
+
+
+def test_create_rack_larger_module_fewer_teeth(tmp_path: Path) -> None:
+    out_fine = tmp_path / "rack_fine.stl"
+    out_coarse = tmp_path / "rack_coarse.stl"
+
+    create_rack(str(out_fine), length=5.0, module=0.25)
+    create_rack(str(out_coarse), length=5.0, module=1.0)
+
+    m_fine = read_stl_file(str(out_fine))
+    m_coarse = read_stl_file(str(out_coarse))
+
+    # Finer module → more teeth → more faces
+    assert m_fine.face_count > m_coarse.face_count
+
+
+def test_create_rack_invalid_length_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_rack.stl"
+
+    with pytest.raises(ValueError, match="length must be positive"):
+        create_rack(str(output_path), length=0.0)
+
+
+def test_create_rack_invalid_module_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_rack2.stl"
+
+    with pytest.raises(ValueError, match="module must be positive"):
+        create_rack(str(output_path), module=-1.0)
+
+
+# --- create_i_beam ----------------------------------------------------------
+
+
+def test_create_i_beam_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "beam.stl"
+
+    result = create_i_beam(str(output_path))
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_create_i_beam_dimensions(tmp_path: Path) -> None:
+    output_path = tmp_path / "beam_dim.stl"
+    width = 0.4
+    height = 0.8
+    length = 4.0
+
+    create_i_beam(str(output_path), width=width, height=height, length=length)
+
+    mesh = read_stl_file(str(output_path))
+
+    x_span = mesh.bounding_box["x"][1] - mesh.bounding_box["x"][0]
+    assert abs(x_span - width) < 0.05
+
+    z_span = mesh.bounding_box["z"][1] - mesh.bounding_box["z"][0]
+    assert abs(z_span - height) < 0.05
+
+    y_span = mesh.bounding_box["y"][1] - mesh.bounding_box["y"][0]
+    assert abs(y_span - length) < 0.05
+
+
+def test_create_i_beam_invalid_height_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_beam.stl"
+
+    with pytest.raises(ValueError, match="height must be greater than 2 \\* flange_thickness"):
+        create_i_beam(str(output_path), height=0.05, flange_thickness=0.06)
+
+
+def test_create_i_beam_invalid_width_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_beam2.stl"
+
+    with pytest.raises(ValueError, match="width must be greater than web_thickness"):
+        create_i_beam(str(output_path), width=0.02, web_thickness=0.04)
+
+
+def test_create_i_beam_invalid_length_raises(tmp_path: Path) -> None:
+    output_path = tmp_path / "bad_beam3.stl"
+
+    with pytest.raises(ValueError, match="length must be positive"):
+        create_i_beam(str(output_path), length=0.0)
+
+
+# --- bend_stl ---------------------------------------------------------------
+
+
+def test_bend_stl_default(tmp_path: Path, sample_binary_stl: Path) -> None:
+    output_path = tmp_path / "bent.stl"
+
+    result = bend_stl(str(sample_binary_stl), str(output_path), angle=90.0)
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_bend_stl_90_degrees_changes_bounding_box(tmp_path: Path) -> None:
+    # Create a simple cylinder aligned along X axis
+    cyl_path = tmp_path / "cyl.stl"
+    create_cylinder(str(cyl_path), radius=0.1, height=4.0, segments=8)
+    # Rotate so cylinder axis is along X
+    rotated_path = tmp_path / "cyl_x.stl"
+    rotate_stl(str(cyl_path), str(rotated_path), axis="z", angle=90.0)
+
+    output_path = tmp_path / "bent_cyl.stl"
+    bend_stl(str(rotated_path), str(output_path), angle=90.0, bend_radius=2.0, axis="x")
+
+    mesh = read_stl_file(str(output_path))
+    assert mesh.face_count > 0
+
+
+def test_bend_stl_zero_angle_is_noop(tmp_path: Path, sample_binary_stl: Path) -> None:
+    output_path = tmp_path / "unbent.stl"
+
+    bend_stl(str(sample_binary_stl), str(output_path), angle=0.0)
+
+    orig = read_stl_file(str(sample_binary_stl))
+    bent = read_stl_file(str(output_path))
+    assert orig.face_count == bent.face_count
+
+
+def test_bend_stl_invalid_axis_raises(tmp_path: Path, sample_binary_stl: Path) -> None:
+    output_path = tmp_path / "bad_bend.stl"
+
+    with pytest.raises(ValueError, match="Invalid axis"):
+        bend_stl(str(sample_binary_stl), str(output_path), angle=45.0, axis="w")
+
+
+def test_bend_stl_invalid_radius_raises(tmp_path: Path, sample_binary_stl: Path) -> None:
+    output_path = tmp_path / "bad_bend2.stl"
+
+    with pytest.raises(ValueError, match="bend_radius must be positive"):
+        bend_stl(str(sample_binary_stl), str(output_path), angle=90.0, bend_radius=0.0)

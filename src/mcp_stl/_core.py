@@ -3335,6 +3335,989 @@ def twist_stl(
     return output_path
 
 
+def create_arch(
+    output_path: str,
+    inner_radius: float = 1.0,
+    outer_radius: float = 1.3,
+    depth: float = 0.5,
+    segments: int = 32,
+    arch_angle: float = 180.0,
+) -> str:
+    """Creates an architectural arch mesh.
+
+    The arch spans the angle range from 0° to *arch_angle* (default 180° =
+    semicircular arch) in the XY plane.  The arch is extruded symmetrically
+    along ±Z by *depth*/2.  A 180° arch produces a classic Roman semicircular
+    arch; smaller angles produce Gothic-style pointed or segmental arches.
+
+    The arch origin is at the centre of the chord (the imaginary line between
+    the two base points).  A 180° arch therefore has its two feet at
+    (-outer_radius, 0, ±depth/2) and (+outer_radius, 0, ±depth/2).
+
+    Essential for bridges, aqueducts, doorways, and vault construction —
+    the arch is one of humanity's most transformative structural inventions.
+
+    Args:
+        output_path: Output STL file path.
+        inner_radius: Inner (soffit) radius of the arch ring (default 1.0).
+        outer_radius: Outer (extrados) radius of the arch ring (default 1.3).
+        depth: Extrusion depth along the Z axis (default 0.5).
+        segments: Number of arc subdivisions (default 32).
+        arch_angle: Total arc sweep in degrees; 180 = semicircle (default 180.0).
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        ValueError: If inner_radius >= outer_radius or arch_angle <= 0 or
+            arch_angle > 360.
+
+    Example:
+        >>> create_arch("arch.stl", inner_radius=0.8, outer_radius=1.0, depth=0.4)
+        "arch.stl"
+    """
+    if inner_radius >= outer_radius:
+        raise ValueError("inner_radius must be less than outer_radius")
+    if arch_angle <= 0.0 or arch_angle > 360.0:
+        raise ValueError("arch_angle must be in (0, 360]")
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    half_d = depth / 2.0
+    sweep = float(np.radians(arch_angle))
+    start_angle = 0.0  # arch starts at +X side, sweeps CCW through top
+
+    for i in range(segments):
+        t0 = start_angle + (i / segments) * sweep
+        t1 = start_angle + ((i + 1) / segments) * sweep
+
+        # Four corners of a quad ring segment (front face z = +half_d)
+        # Inner arc corners
+        ix0 = inner_radius * float(np.cos(t0))
+        iy0 = inner_radius * float(np.sin(t0))
+        ix1 = inner_radius * float(np.cos(t1))
+        iy1 = inner_radius * float(np.sin(t1))
+        # Outer arc corners
+        ox0 = outer_radius * float(np.cos(t0))
+        oy0 = outer_radius * float(np.sin(t0))
+        ox1 = outer_radius * float(np.cos(t1))
+        oy1 = outer_radius * float(np.sin(t1))
+
+        # Front face (z = +half_d), normal [0,0,+1]
+        front_n = [0.0, 0.0, 1.0]
+        verts_list.extend([[ix0, iy0, half_d], [ox0, oy0, half_d], [ox1, oy1, half_d]])
+        normals_list.extend([front_n] * 3)
+        verts_list.extend([[ix0, iy0, half_d], [ox1, oy1, half_d], [ix1, iy1, half_d]])
+        normals_list.extend([front_n] * 3)
+
+        # Back face (z = -half_d), normal [0,0,-1]
+        back_n = [0.0, 0.0, -1.0]
+        verts_list.extend([[ix0, iy0, -half_d], [ox1, oy1, -half_d], [ox0, oy0, -half_d]])
+        normals_list.extend([back_n] * 3)
+        verts_list.extend([[ix0, iy0, -half_d], [ix1, iy1, -half_d], [ox1, oy1, -half_d]])
+        normals_list.extend([back_n] * 3)
+
+        # Outer (extrados) face
+        mid_t = (t0 + t1) / 2.0
+        out_n = [float(np.cos(mid_t)), float(np.sin(mid_t)), 0.0]
+        verts_list.extend([
+            [ox0, oy0, -half_d], [ox1, oy1, -half_d], [ox1, oy1, half_d],
+        ])
+        normals_list.extend([out_n] * 3)
+        verts_list.extend([
+            [ox0, oy0, -half_d], [ox1, oy1, half_d], [ox0, oy0, half_d],
+        ])
+        normals_list.extend([out_n] * 3)
+
+        # Inner (soffit/intrados) face
+        in_n = [-float(np.cos(mid_t)), -float(np.sin(mid_t)), 0.0]
+        verts_list.extend([
+            [ix0, iy0, half_d], [ix1, iy1, half_d], [ix1, iy1, -half_d],
+        ])
+        normals_list.extend([in_n] * 3)
+        verts_list.extend([
+            [ix0, iy0, half_d], [ix1, iy1, -half_d], [ix0, iy0, -half_d],
+        ])
+        normals_list.extend([in_n] * 3)
+
+    # Side faces at the two ends of the arch (the cut faces)
+    if arch_angle < 360.0:
+        for angle, sign in [(start_angle, -1.0), (start_angle + sweep, 1.0)]:
+            cx_ang = float(np.cos(angle))
+            cy_ang = float(np.sin(angle))
+            # Tangent direction → outward normal is perpendicular
+            side_n = [sign * (-cy_ang), sign * cx_ang, 0.0]
+            norm_len = float(np.sqrt(side_n[0] ** 2 + side_n[1] ** 2))
+            if norm_len > 1e-10:
+                side_n = [side_n[0] / norm_len, side_n[1] / norm_len, 0.0]
+
+            ix = inner_radius * cx_ang
+            iy = inner_radius * cy_ang
+            ox = outer_radius * cx_ang
+            oy = outer_radius * cy_ang
+
+            if sign < 0:
+                verts_list.extend([[ix, iy, -half_d], [ox, oy, -half_d], [ox, oy, half_d]])
+                normals_list.extend([side_n] * 3)
+                verts_list.extend([[ix, iy, -half_d], [ox, oy, half_d], [ix, iy, half_d]])
+                normals_list.extend([side_n] * 3)
+            else:
+                verts_list.extend([[ix, iy, half_d], [ox, oy, half_d], [ox, oy, -half_d]])
+                normals_list.extend([side_n] * 3)
+                verts_list.extend([[ix, iy, half_d], [ox, oy, -half_d], [ix, iy, -half_d]])
+                normals_list.extend([side_n] * 3)
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def create_bolt(
+    output_path: str,
+    shaft_radius: float = 0.2,
+    head_radius: float = 0.4,
+    shaft_length: float = 2.0,
+    head_height: float = 0.35,
+    thread_pitch: float = 0.2,
+    thread_depth: float = 0.04,
+    segments: int = 6,
+    thread_segments: int = 32,
+) -> str:
+    """Creates a hex bolt mesh with a threaded shaft.
+
+    The bolt axis is aligned along the Y axis.  The hex head sits at
+    y=0 … y=head_height and the threaded shaft extends from y=head_height
+    to y=head_height+shaft_length.  The thread profile is modelled as a
+    series of raised helical rings (simplified visual approximation).
+
+    Bolts are among the most fundamental mechanical fasteners and were
+    critical to the Industrial Revolution and modern construction.
+
+    Args:
+        output_path: Output STL file path.
+        shaft_radius: Nominal shaft (minor thread) radius (default 0.2).
+        head_radius: Circumscribed radius of the hexagonal head (default 0.4).
+        shaft_length: Length of the threaded shaft section (default 2.0).
+        head_height: Height of the hexagonal head along Y (default 0.35).
+        thread_pitch: Axial distance between thread crests (default 0.2).
+        thread_depth: Radial height of thread crests above shaft (default 0.04).
+        segments: Sides of the hexagonal head polygon (default 6).
+        thread_segments: Circumferential segments per thread ring (default 32).
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        ValueError: If shaft_radius <= 0, head_radius <= shaft_radius,
+            shaft_length <= 0, or thread_pitch <= 0.
+
+    Example:
+        >>> create_bolt("bolt.stl", shaft_radius=0.15, shaft_length=1.5)
+        "bolt.stl"
+    """
+    if shaft_radius <= 0:
+        raise ValueError("shaft_radius must be positive")
+    if head_radius <= shaft_radius:
+        raise ValueError("head_radius must be greater than shaft_radius")
+    if shaft_length <= 0:
+        raise ValueError("shaft_length must be positive")
+    if thread_pitch <= 0:
+        raise ValueError("thread_pitch must be positive")
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    # --- Hexagonal head (prism from y=0 to y=head_height) ---
+    head_profile = [
+        (head_radius * float(np.cos(2 * np.pi * k / segments)),
+         head_radius * float(np.sin(2 * np.pi * k / segments)))
+        for k in range(segments)
+    ]
+    head_verts, head_norms = _extrude_profile(head_profile, head_height)
+    # _extrude_profile centres at y=0; shift up by head_height/2
+    shift = head_height / 2.0
+    for v in head_verts:
+        v[1] += shift
+    verts_list.extend(head_verts)
+    normals_list.extend(head_norms)
+
+    shaft_y_start = head_height
+    shaft_y_end = head_height + shaft_length
+
+    # --- Smooth shaft cylinder (sides) ---
+    for i in range(thread_segments):
+        t0 = (i / thread_segments) * 2 * np.pi
+        t1 = ((i + 1) / thread_segments) * 2 * np.pi
+        x0 = shaft_radius * float(np.cos(t0))
+        z0 = shaft_radius * float(np.sin(t0))
+        x1 = shaft_radius * float(np.cos(t1))
+        z1 = shaft_radius * float(np.sin(t1))
+        mid_t = (t0 + t1) / 2.0
+        nx = float(np.cos(mid_t))
+        nz = float(np.sin(mid_t))
+        side_n = [nx, 0.0, nz]
+        verts_list.extend([
+            [x0, shaft_y_start, z0], [x1, shaft_y_start, z1], [x1, shaft_y_end, z1],
+        ])
+        normals_list.extend([side_n] * 3)
+        verts_list.extend([
+            [x0, shaft_y_start, z0], [x1, shaft_y_end, z1], [x0, shaft_y_end, z0],
+        ])
+        normals_list.extend([side_n] * 3)
+
+    # --- Bottom cap of shaft ---
+    for i in range(thread_segments):
+        t0 = (i / thread_segments) * 2 * np.pi
+        t1 = ((i + 1) / thread_segments) * 2 * np.pi
+        x0 = shaft_radius * float(np.cos(t0))
+        z0 = shaft_radius * float(np.sin(t0))
+        x1 = shaft_radius * float(np.cos(t1))
+        z1 = shaft_radius * float(np.sin(t1))
+        verts_list.extend([[x0, shaft_y_end, z0], [0.0, shaft_y_end, 0.0], [x1, shaft_y_end, z1]])
+        normals_list.extend([[0.0, 1.0, 0.0]] * 3)
+
+    # --- Thread rings (raised bands around shaft) ---
+    num_threads = max(1, int(shaft_length / thread_pitch))
+    crest_r = shaft_radius + thread_depth
+    for k in range(num_threads):
+        ring_y = shaft_y_start + (k + 0.5) * (shaft_length / num_threads)
+        ring_half = thread_pitch * 0.3
+        y_bot = max(ring_y - ring_half, shaft_y_start)
+        y_top = min(ring_y + ring_half, shaft_y_end)
+
+        for i in range(thread_segments):
+            t0 = (i / thread_segments) * 2 * np.pi
+            t1 = ((i + 1) / thread_segments) * 2 * np.pi
+            cx0 = float(np.cos(t0))
+            cz0 = float(np.sin(t0))
+            cx1 = float(np.cos(t1))
+            cz1 = float(np.sin(t1))
+            mid_t = (t0 + t1) / 2.0
+            nx = float(np.cos(mid_t))
+            nz = float(np.sin(mid_t))
+            out_n = [nx, 0.0, nz]
+            # outer surface of thread ring
+            verts_list.extend([
+                [crest_r * cx0, y_bot, crest_r * cz0],
+                [crest_r * cx1, y_bot, crest_r * cz1],
+                [crest_r * cx1, y_top, crest_r * cz1],
+            ])
+            normals_list.extend([out_n] * 3)
+            verts_list.extend([
+                [crest_r * cx0, y_bot, crest_r * cz0],
+                [crest_r * cx1, y_top, crest_r * cz1],
+                [crest_r * cx0, y_top, crest_r * cz0],
+            ])
+            normals_list.extend([out_n] * 3)
+            # bottom annular cap of thread ring
+            verts_list.extend([
+                [shaft_radius * cx0, y_bot, shaft_radius * cz0],
+                [crest_r * cx1, y_bot, crest_r * cz1],
+                [crest_r * cx0, y_bot, crest_r * cz0],
+            ])
+            normals_list.extend([[0.0, -1.0, 0.0]] * 3)
+            verts_list.extend([
+                [shaft_radius * cx0, y_bot, shaft_radius * cz0],
+                [shaft_radius * cx1, y_bot, shaft_radius * cz1],
+                [crest_r * cx1, y_bot, crest_r * cz1],
+            ])
+            normals_list.extend([[0.0, -1.0, 0.0]] * 3)
+            # top annular cap of thread ring
+            verts_list.extend([
+                [crest_r * cx0, y_top, crest_r * cz0],
+                [crest_r * cx1, y_top, crest_r * cz1],
+                [shaft_radius * cx0, y_top, shaft_radius * cz0],
+            ])
+            normals_list.extend([[0.0, 1.0, 0.0]] * 3)
+            verts_list.extend([
+                [crest_r * cx1, y_top, crest_r * cz1],
+                [shaft_radius * cx1, y_top, shaft_radius * cz1],
+                [shaft_radius * cx0, y_top, shaft_radius * cz0],
+            ])
+            normals_list.extend([[0.0, 1.0, 0.0]] * 3)
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def create_nut(
+    output_path: str,
+    inner_radius: float = 0.2,
+    outer_radius: float = 0.4,
+    height: float = 0.35,
+    segments: int = 6,
+    chamfer: float = 0.03,
+) -> str:
+    """Creates a hex nut mesh.
+
+    The nut is a regular hexagonal prism (default 6-sided) with a
+    cylindrical bore running through its centre along the Y axis.
+    Optional chamfer bevels are applied to the top and bottom edges of the
+    bore opening.
+
+    Pairs with :func:`create_bolt`.  The threaded nut and bolt are among the
+    simplest yet most important fasteners ever devised.
+
+    Args:
+        output_path: Output STL file path.
+        inner_radius: Bore (thread minor) radius (default 0.2).
+        outer_radius: Circumscribed radius of the hex body (default 0.4).
+        height: Nut height along Y (default 0.35).
+        segments: Sides of the outer polygon (default 6 → hex nut).
+        chamfer: Size of the chamfer bevel on the bore edges (default 0.03;
+            set to 0 to disable).
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        ValueError: If inner_radius >= outer_radius or height <= 0.
+
+    Example:
+        >>> create_nut("nut.stl", inner_radius=0.18, outer_radius=0.38)
+        "nut.stl"
+    """
+    if inner_radius >= outer_radius:
+        raise ValueError("inner_radius must be less than outer_radius")
+    if height <= 0:
+        raise ValueError("height must be positive")
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    half_h = height / 2.0
+    cham = min(chamfer, height / 3.0, (outer_radius - inner_radius) / 3.0)
+
+    circle_segs = 32  # segments for circular bore
+
+    # ---- Top face (y = +half_h): flat annular ring with hex outer boundary ----
+    # Build as triangles from hex vertices to bore vertices
+    hex_top = [
+        [outer_radius * float(np.cos(2 * np.pi * k / segments)),
+         half_h,
+         outer_radius * float(np.sin(2 * np.pi * k / segments))]
+        for k in range(segments)
+    ]
+    bore_top = [
+        [(inner_radius + cham) * float(np.cos(2 * np.pi * k / circle_segs)),
+         half_h,
+         (inner_radius + cham) * float(np.sin(2 * np.pi * k / circle_segs))]
+        for k in range(circle_segs)
+    ]
+    top_n = [0.0, 1.0, 0.0]
+
+    # Combine profiles for top and bottom annular faces using a fan from centroid
+    # Top annular face (hex outer ring to bore ring)
+    for k in range(segments):
+        h0 = hex_top[k]
+        h1 = hex_top[(k + 1) % segments]
+        mid_x = (h0[0] + h1[0]) / 2.0
+        mid_z = (h0[2] + h1[2]) / 2.0
+        bore_cx = (inner_radius + cham) * mid_x / float(np.sqrt(mid_x ** 2 + mid_z ** 2 + 1e-30))
+        bore_cz = (inner_radius + cham) * mid_z / float(np.sqrt(mid_x ** 2 + mid_z ** 2 + 1e-30))
+        bc = [bore_cx, half_h, bore_cz]
+        verts_list.extend([h0, h1, bc])
+        normals_list.extend([top_n] * 3)
+
+    # Bore disk at top (fill inner circle)
+    for k in range(circle_segs):
+        b0 = bore_top[k]
+        b1 = bore_top[(k + 1) % circle_segs]
+        verts_list.extend([[0.0, half_h, 0.0], b1, b0])
+        normals_list.extend([top_n] * 3)
+
+    # Bottom face (mirror of top)
+    bore_bot = [
+        [(inner_radius + cham) * float(np.cos(2 * np.pi * k / circle_segs)),
+         -half_h,
+         (inner_radius + cham) * float(np.sin(2 * np.pi * k / circle_segs))]
+        for k in range(circle_segs)
+    ]
+    hex_bot = [
+        [outer_radius * float(np.cos(2 * np.pi * k / segments)),
+         -half_h,
+         outer_radius * float(np.sin(2 * np.pi * k / segments))]
+        for k in range(segments)
+    ]
+    bot_n = [0.0, -1.0, 0.0]
+
+    for k in range(segments):
+        h0 = hex_bot[k]
+        h1 = hex_bot[(k + 1) % segments]
+        mid_x = (h0[0] + h1[0]) / 2.0
+        mid_z = (h0[2] + h1[2]) / 2.0
+        bore_cx = (inner_radius + cham) * mid_x / float(np.sqrt(mid_x ** 2 + mid_z ** 2 + 1e-30))
+        bore_cz = (inner_radius + cham) * mid_z / float(np.sqrt(mid_x ** 2 + mid_z ** 2 + 1e-30))
+        bc = [bore_cx, -half_h, bore_cz]
+        verts_list.extend([h0, bc, h1])
+        normals_list.extend([bot_n] * 3)
+
+    for k in range(circle_segs):
+        b0 = bore_bot[k]
+        b1 = bore_bot[(k + 1) % circle_segs]
+        verts_list.extend([[0.0, -half_h, 0.0], b0, b1])
+        normals_list.extend([bot_n] * 3)
+
+    # Hex side faces
+    hex_profile = [
+        (outer_radius * float(np.cos(2 * np.pi * k / segments)),
+         outer_radius * float(np.sin(2 * np.pi * k / segments)))
+        for k in range(segments)
+    ]
+    for k in range(segments):
+        x0, z0 = hex_profile[k]
+        x1, z1 = hex_profile[(k + 1) % segments]
+        dx = x1 - x0
+        dz = z1 - z0
+        # outward normal (90° CW rotation of travel dir in XZ)
+        nx, nz = dz, -dx
+        length = float(np.sqrt(nx * nx + nz * nz))
+        if length > 1e-10:
+            nx /= length
+            nz /= length
+        side_n = [nx, 0.0, nz]
+        verts_list.extend([
+            [x0, -half_h, z0], [x1, -half_h, z1], [x1, half_h, z1],
+        ])
+        normals_list.extend([side_n] * 3)
+        verts_list.extend([
+            [x0, -half_h, z0], [x1, half_h, z1], [x0, half_h, z0],
+        ])
+        normals_list.extend([side_n] * 3)
+
+    # Bore inner wall
+    for k in range(circle_segs):
+        t0 = (k / circle_segs) * 2 * np.pi
+        t1 = ((k + 1) / circle_segs) * 2 * np.pi
+        mid_t = (t0 + t1) / 2.0
+        bx0 = inner_radius * float(np.cos(t0))
+        bz0 = inner_radius * float(np.sin(t0))
+        bx1 = inner_radius * float(np.cos(t1))
+        bz1 = inner_radius * float(np.sin(t1))
+        # inward normal (pointing toward axis)
+        in_n = [-float(np.cos(mid_t)), 0.0, -float(np.sin(mid_t))]
+        verts_list.extend([
+            [bx0, half_h, bz0], [bx1, half_h, bz1], [bx1, -half_h, bz1],
+        ])
+        normals_list.extend([in_n] * 3)
+        verts_list.extend([
+            [bx0, half_h, bz0], [bx1, -half_h, bz1], [bx0, -half_h, bz0],
+        ])
+        normals_list.extend([in_n] * 3)
+
+    # Chamfer rings on top and bottom bore edges
+    if cham > 1e-6:
+        for y_face, flip in [(half_h, False), (-half_h, True)]:
+            y_cham = y_face - cham if not flip else y_face + cham
+            for k in range(circle_segs):
+                t0 = (k / circle_segs) * 2 * np.pi
+                t1 = ((k + 1) / circle_segs) * 2 * np.pi
+                mid_t = (t0 + t1) / 2.0
+                # inward & down/up 45° normal
+                nx = -float(np.cos(mid_t)) * 0.707
+                nz = -float(np.sin(mid_t)) * 0.707
+                ny = 0.707 if not flip else -0.707
+                cham_n = [nx, ny, nz]
+                ix0 = inner_radius * float(np.cos(t0))
+                iz0 = inner_radius * float(np.sin(t0))
+                ix1 = inner_radius * float(np.cos(t1))
+                iz1 = inner_radius * float(np.sin(t1))
+                ox0 = (inner_radius + cham) * float(np.cos(t0))
+                oz0 = (inner_radius + cham) * float(np.sin(t0))
+                ox1 = (inner_radius + cham) * float(np.cos(t1))
+                oz1 = (inner_radius + cham) * float(np.sin(t1))
+                if not flip:
+                    verts_list.extend([
+                        [ox0, y_face, oz0], [ox1, y_face, oz1], [ix1, y_cham, iz1],
+                    ])
+                    normals_list.extend([cham_n] * 3)
+                    verts_list.extend([
+                        [ox0, y_face, oz0], [ix1, y_cham, iz1], [ix0, y_cham, iz0],
+                    ])
+                    normals_list.extend([cham_n] * 3)
+                else:
+                    verts_list.extend([
+                        [ox0, y_face, oz0], [ix1, y_cham, iz1], [ox1, y_face, oz1],
+                    ])
+                    normals_list.extend([cham_n] * 3)
+                    verts_list.extend([
+                        [ox0, y_face, oz0], [ix0, y_cham, iz0], [ix1, y_cham, iz1],
+                    ])
+                    normals_list.extend([cham_n] * 3)
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def create_rack(
+    output_path: str,
+    length: float = 5.0,
+    height: float = 0.5,
+    thickness: float = 0.3,
+    module: float = 0.5,
+    pressure_angle_deg: float = 20.0,
+) -> str:
+    """Creates a linear gear rack mesh.
+
+    A gear rack is a straight bar with evenly spaced teeth that meshes with a
+    spur gear.  The rack is aligned along the X axis; teeth protrude in the +Y
+    direction from the top face.  The body occupies
+    ``x ∈ [-length/2, +length/2]``, ``y ∈ [-height/2, +height/2]``, and
+    ``z ∈ [-thickness/2, +thickness/2]``.
+
+    The rack converts rotary gear motion into linear motion (or vice versa)
+    and is fundamental in mechanisms such as rack-and-pinion steering,
+    presses, and lead screws.
+
+    Args:
+        output_path: Output STL file path.
+        length: Total rack length along X (default 5.0).
+        height: Height of the rack body (excluding teeth) along Y (default 0.5).
+        thickness: Rack depth along Z (default 0.3).
+        module: Gear module; tooth pitch = π × module (default 0.5).
+        pressure_angle_deg: Pressure angle in degrees; controls tooth flank
+            slope (default 20.0).
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        ValueError: If length <= 0, height <= 0, thickness <= 0, or module <= 0.
+
+    Example:
+        >>> create_rack("rack.stl", length=6.0, module=0.4)
+        "rack.stl"
+    """
+    if length <= 0:
+        raise ValueError("length must be positive")
+    if height <= 0:
+        raise ValueError("height must be positive")
+    if thickness <= 0:
+        raise ValueError("thickness must be positive")
+    if module <= 0:
+        raise ValueError("module must be positive")
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    half_l = length / 2.0
+    half_h = height / 2.0
+    half_t = thickness / 2.0
+
+    addendum = module
+    tooth_pitch = float(np.pi) * module
+    num_teeth = max(1, int(length / tooth_pitch))
+    tooth_half_base = tooth_pitch * 0.45 / 2.0
+    pa_rad = float(np.radians(pressure_angle_deg))
+    tip_half = tooth_half_base * (1.0 - 0.5 * float(np.sin(pa_rad)))
+    tooth_top_y = half_h + addendum
+
+    # X positions of tooth centres (evenly spaced)
+    pitch_start = -((num_teeth - 1) * tooth_pitch / 2.0)
+    tooth_centres = [pitch_start + i * tooth_pitch for i in range(num_teeth)]
+
+    # Rack body — a box with the top face cut into a profile
+    # Bottom face (y = -half_h)
+    verts_list.extend([
+        [-half_l, -half_h, -half_t], [half_l, -half_h, -half_t], [half_l, -half_h, half_t],
+    ])
+    normals_list.extend([[0.0, -1.0, 0.0]] * 3)
+    verts_list.extend([
+        [-half_l, -half_h, -half_t], [half_l, -half_h, half_t], [-half_l, -half_h, half_t],
+    ])
+    normals_list.extend([[0.0, -1.0, 0.0]] * 3)
+
+    # Front face (z = +half_t)
+    # Build top edge profile for front face
+    # Collect the x-coords of the toothed top profile from left to right
+    top_profile_x: list[float] = [-half_l]
+    top_profile_y: list[float] = [half_h]
+
+    for cx in tooth_centres:
+        x_base_l = cx - tooth_half_base
+        x_tip_l = cx - tip_half
+        x_tip_r = cx + tip_half
+        x_base_r = cx + tooth_half_base
+        if x_base_l > -half_l:
+            top_profile_x.append(x_base_l)
+            top_profile_y.append(half_h)
+        top_profile_x.extend([x_tip_l, x_tip_r])
+        top_profile_y.extend([tooth_top_y, tooth_top_y])
+        if x_base_r < half_l:
+            top_profile_x.append(x_base_r)
+            top_profile_y.append(half_h)
+    top_profile_x.append(half_l)
+    top_profile_y.append(half_h)
+
+    n_pts = len(top_profile_x)
+
+    # Triangulate front face (z = +half_t)
+    for i in range(n_pts - 1):
+        x0, y0 = top_profile_x[i], top_profile_y[i]
+        x1, y1 = top_profile_x[i + 1], top_profile_y[i + 1]
+        # Bottom points
+        verts_list.extend([
+            [x0, -half_h, half_t], [x1, -half_h, half_t], [x1, y1, half_t],
+        ])
+        normals_list.extend([[0.0, 0.0, 1.0]] * 3)
+        if abs(y0 - y1) > 1e-10 or abs(y0 - (-half_h)) > 1e-10:
+            verts_list.extend([
+                [x0, -half_h, half_t], [x1, y1, half_t], [x0, y0, half_t],
+            ])
+            normals_list.extend([[0.0, 0.0, 1.0]] * 3)
+
+    # Back face (z = -half_t) — same profile, reversed winding
+    for i in range(n_pts - 1):
+        x0, y0 = top_profile_x[i], top_profile_y[i]
+        x1, y1 = top_profile_x[i + 1], top_profile_y[i + 1]
+        verts_list.extend([
+            [x0, -half_h, -half_t], [x1, y1, -half_t], [x1, -half_h, -half_t],
+        ])
+        normals_list.extend([[0.0, 0.0, -1.0]] * 3)
+        if abs(y0 - y1) > 1e-10 or abs(y0 - (-half_h)) > 1e-10:
+            verts_list.extend([
+                [x0, -half_h, -half_t], [x0, y0, -half_t], [x1, y1, -half_t],
+            ])
+            normals_list.extend([[0.0, 0.0, -1.0]] * 3)
+
+    # Side faces (x = -half_l, x = +half_l)
+    for x_val, nx_val in [(-half_l, -1.0), (half_l, 1.0)]:
+        # Simple rectangle from bottom to top_h
+        top_y_side = half_h  # sides don't include teeth (teeth run between sides)
+        verts_list.extend([
+            [x_val, -half_h, -half_t], [x_val, top_y_side, half_t], [x_val, -half_h, half_t],
+        ])
+        normals_list.extend([[nx_val, 0.0, 0.0]] * 3)
+        verts_list.extend([
+            [x_val, -half_h, -half_t], [x_val, top_y_side, -half_t], [x_val, top_y_side, half_t],
+        ])
+        normals_list.extend([[nx_val, 0.0, 0.0]] * 3)
+
+    # Top (toothed) side and back quad faces
+    # Gap segments between teeth (y = half_h, sloped flanks, tip tops)
+    for i in range(n_pts - 1):
+        x0, y0 = top_profile_x[i], top_profile_y[i]
+        x1, y1 = top_profile_x[i + 1], top_profile_y[i + 1]
+        dx = x1 - x0
+        dy = y1 - y0
+        length_seg = float(np.sqrt(dx * dx + dy * dy))
+        if length_seg < 1e-10:
+            continue
+        # Outward normal for each toothed-top segment: 90° CCW rotation of the
+        # travel direction in the XY plane.
+        nx = dy / length_seg
+        ny = -dx / length_seg
+        seg_n = [nx, ny, 0.0]
+        verts_list.extend([
+            [x0, y0, -half_t], [x0, y0, half_t], [x1, y1, half_t],
+        ])
+        normals_list.extend([seg_n] * 3)
+        verts_list.extend([
+            [x0, y0, -half_t], [x1, y1, half_t], [x1, y1, -half_t],
+        ])
+        normals_list.extend([seg_n] * 3)
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def create_i_beam(
+    output_path: str,
+    width: float = 0.5,
+    height: float = 1.0,
+    length: float = 5.0,
+    flange_thickness: float = 0.06,
+    web_thickness: float = 0.04,
+) -> str:
+    """Creates an I-beam (H-beam) structural steel section mesh.
+
+    The I-beam cross-section has two horizontal flanges connected by a
+    vertical web.  The beam is extruded along the Y axis.  The cross-section
+    is centred at the origin in the XZ plane.
+
+    I-beams are the primary structural elements of modern buildings, bridges,
+    and industrial frames.  Their efficient cross-section maximises bending
+    stiffness per unit mass — indispensable for civilisation-scale construction.
+
+    Args:
+        output_path: Output STL file path.
+        width: Total flange width along X (default 0.5).
+        height: Total section height along Z (default 1.0).
+        length: Beam length along Y (default 5.0).
+        flange_thickness: Thickness of each flange plate along Z (default 0.06).
+        web_thickness: Thickness of the web plate along X (default 0.04).
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        ValueError: If height <= 2*flange_thickness, width <= web_thickness,
+            or length <= 0.
+
+    Example:
+        >>> create_i_beam("beam.stl", width=0.4, height=0.8, length=4.0)
+        "beam.stl"
+    """
+    if height <= 2 * flange_thickness:
+        raise ValueError("height must be greater than 2 * flange_thickness")
+    if width <= web_thickness:
+        raise ValueError("width must be greater than web_thickness")
+    if length <= 0:
+        raise ValueError("length must be positive")
+
+    half_w = width / 2.0
+    half_h = height / 2.0
+    half_wt = web_thickness / 2.0
+    half_l = length / 2.0
+    ft = flange_thickness
+
+    # I-beam cross section in the XZ plane (Y is the length axis):
+    #   Top flange:    x ∈ [-half_w, +half_w],  z ∈ [half_h-ft, half_h]
+    #   Web:           x ∈ [-half_wt, +half_wt], z ∈ [-(half_h-ft), +(half_h-ft)]
+    #   Bottom flange: x ∈ [-half_w, +half_w],  z ∈ [-half_h, -(half_h-ft)]
+
+    verts_list: list[list[float]] = []
+    normals_list: list[list[float]] = []
+
+    def add_rect_face(
+        corners: list[list[float]], normal: list[float], flip: bool = False
+    ) -> None:
+        """Add two triangles for a planar quad (4 corners in order)."""
+        c = corners
+        if not flip:
+            verts_list.extend([c[0], c[1], c[2]])
+            normals_list.extend([normal] * 3)
+            verts_list.extend([c[0], c[2], c[3]])
+            normals_list.extend([normal] * 3)
+        else:
+            verts_list.extend([c[0], c[2], c[1]])
+            normals_list.extend([normal] * 3)
+            verts_list.extend([c[0], c[3], c[2]])
+            normals_list.extend([normal] * 3)
+
+    # ------- Y = -half_l (back end cap) -------
+    # Top flange
+    add_rect_face(
+        [[-half_w, -half_l, half_h - ft], [half_w, -half_l, half_h - ft],
+         [half_w, -half_l, half_h], [-half_w, -half_l, half_h]],
+        [0.0, -1.0, 0.0],
+    )
+    # Web
+    add_rect_face(
+        [[-half_wt, -half_l, -(half_h - ft)], [half_wt, -half_l, -(half_h - ft)],
+         [half_wt, -half_l, half_h - ft], [-half_wt, -half_l, half_h - ft]],
+        [0.0, -1.0, 0.0],
+    )
+    # Bottom flange
+    add_rect_face(
+        [[-half_w, -half_l, -half_h], [half_w, -half_l, -half_h],
+         [half_w, -half_l, -(half_h - ft)], [-half_w, -half_l, -(half_h - ft)]],
+        [0.0, -1.0, 0.0],
+    )
+
+    # ------- Y = +half_l (front end cap) -------
+    add_rect_face(
+        [[-half_w, half_l, half_h - ft], [half_w, half_l, half_h - ft],
+         [half_w, half_l, half_h], [-half_w, half_l, half_h]],
+        [0.0, 1.0, 0.0], flip=True,
+    )
+    add_rect_face(
+        [[-half_wt, half_l, -(half_h - ft)], [half_wt, half_l, -(half_h - ft)],
+         [half_wt, half_l, half_h - ft], [-half_wt, half_l, half_h - ft]],
+        [0.0, 1.0, 0.0], flip=True,
+    )
+    add_rect_face(
+        [[-half_w, half_l, -half_h], [half_w, half_l, -half_h],
+         [half_w, half_l, -(half_h - ft)], [-half_w, half_l, -(half_h - ft)]],
+        [0.0, 1.0, 0.0], flip=True,
+    )
+
+    # ------- Longitudinal faces (running along Y axis) -------
+    # Top flange — top surface (z = half_h)
+    add_rect_face(
+        [[-half_w, -half_l, half_h], [half_w, -half_l, half_h],
+         [half_w, half_l, half_h], [-half_w, half_l, half_h]],
+        [0.0, 0.0, 1.0],
+    )
+    # Top flange — bottom surface (z = half_h - ft) — only outer parts (not web)
+    for x0, x1 in [(-half_w, -half_wt), (half_wt, half_w)]:
+        add_rect_face(
+            [[x0, -half_l, half_h - ft], [x1, -half_l, half_h - ft],
+             [x1, half_l, half_h - ft], [x0, half_l, half_h - ft]],
+            [0.0, 0.0, -1.0], flip=True,
+        )
+    # Top flange — outer side edges
+    add_rect_face(
+        [[-half_w, -half_l, half_h - ft], [-half_w, -half_l, half_h],
+         [-half_w, half_l, half_h], [-half_w, half_l, half_h - ft]],
+        [-1.0, 0.0, 0.0],
+    )
+    add_rect_face(
+        [[half_w, -half_l, half_h - ft], [half_w, -half_l, half_h],
+         [half_w, half_l, half_h], [half_w, half_l, half_h - ft]],
+        [1.0, 0.0, 0.0], flip=True,
+    )
+
+    # Bottom flange — bottom surface (z = -half_h)
+    add_rect_face(
+        [[-half_w, -half_l, -half_h], [half_w, -half_l, -half_h],
+         [half_w, half_l, -half_h], [-half_w, half_l, -half_h]],
+        [0.0, 0.0, -1.0], flip=True,
+    )
+    # Bottom flange — top surface (z = -(half_h-ft)) — outer parts
+    for x0, x1 in [(-half_w, -half_wt), (half_wt, half_w)]:
+        add_rect_face(
+            [[x0, -half_l, -(half_h - ft)], [x1, -half_l, -(half_h - ft)],
+             [x1, half_l, -(half_h - ft)], [x0, half_l, -(half_h - ft)]],
+            [0.0, 0.0, 1.0],
+        )
+    # Bottom flange — outer side edges
+    add_rect_face(
+        [[-half_w, -half_l, -half_h], [-half_w, -half_l, -(half_h - ft)],
+         [-half_w, half_l, -(half_h - ft)], [-half_w, half_l, -half_h]],
+        [-1.0, 0.0, 0.0], flip=True,
+    )
+    add_rect_face(
+        [[half_w, -half_l, -half_h], [half_w, -half_l, -(half_h - ft)],
+         [half_w, half_l, -(half_h - ft)], [half_w, half_l, -half_h]],
+        [1.0, 0.0, 0.0],
+    )
+
+    # Web — left face (x = -half_wt)
+    add_rect_face(
+        [[-half_wt, -half_l, -(half_h - ft)], [-half_wt, -half_l, half_h - ft],
+         [-half_wt, half_l, half_h - ft], [-half_wt, half_l, -(half_h - ft)]],
+        [-1.0, 0.0, 0.0],
+    )
+    # Web — right face (x = +half_wt)
+    add_rect_face(
+        [[half_wt, -half_l, -(half_h - ft)], [half_wt, -half_l, half_h - ft],
+         [half_wt, half_l, half_h - ft], [half_wt, half_l, -(half_h - ft)]],
+        [1.0, 0.0, 0.0], flip=True,
+    )
+
+    mesh = _build_mesh(verts_list, normals_list)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
+def bend_stl(
+    path: str,
+    output_path: str,
+    angle: float,
+    bend_radius: float = 1.0,
+    axis: str = "z",
+) -> str:
+    """Bends a mesh along a circular arc about the specified axis.
+
+    Each vertex is mapped from its position along the *bend axis* onto a
+    circular arc of the given *bend_radius*.  The bend is applied along the
+    extent of the mesh in the *axis* direction:
+
+    * A vertex at the minimum extent is not displaced (it stays at angle 0).
+    * A vertex at the maximum extent is swept by *angle* degrees.
+    * Intermediate vertices are swept proportionally.
+
+    The bending plane is perpendicular to *axis*.  For ``axis='z'``, the mesh
+    is bent in the XZ plane: the straight length along X becomes a circular
+    arc in the XY plane.
+
+    Normals are rotated by the same per-vertex angle so they remain correct
+    after bending.
+
+    Transforming straight profiles into curved arcs is fundamental to
+    manufacturing pipes, curved beams, springs, and arched structures.
+
+    Args:
+        path: Input STL file path.
+        output_path: Output STL file path.
+        angle: Total bending angle in degrees.  Positive values bend in the
+            standard right-hand-rule direction for the chosen axis.
+        bend_radius: Radius of the neutral axis of the bend (default 1.0).
+        axis: The axis *along which* the mesh is swept ('x', 'y', or 'z';
+            default 'z').  The bending arc lies in the plane perpendicular to
+            the two other axes.
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        FileNotFoundError: If the input file does not exist.
+        ValueError: If axis is invalid or bend_radius <= 0.
+
+    Example:
+        >>> bend_stl("pipe.stl", "curved_pipe.stl", angle=90.0, bend_radius=2.0)
+        "curved_pipe.stl"
+    """
+    if axis.lower() not in ("x", "y", "z"):
+        raise ValueError(f"Invalid axis: {axis!r}. Must be 'x', 'y', or 'z'")
+    if bend_radius <= 0:
+        raise ValueError("bend_radius must be positive")
+
+    mesh = read_stl_file(path)
+    verts = mesh.vertices.astype(np.float64)
+    norms = mesh.normals.astype(np.float64)
+
+    axis_idx = {"x": 0, "y": 1, "z": 2}[axis.lower()]
+    # The two perpendicular axes (swept axis and radial axis)
+    perp1 = (axis_idx + 1) % 3  # radial axis (displacement direction)
+
+    coords = verts[:, axis_idx]
+    coord_min = float(coords.min())
+    coord_max = float(coords.max())
+    coord_range = coord_max - coord_min
+
+    if coord_range < 1e-10:
+        write_stl_mesh(mesh, output_path, "binary")
+        return output_path
+
+    total_angle_rad = float(np.radians(angle))
+
+    # Per-vertex bend angle
+    t_vert = (coords - coord_min) / coord_range
+    vert_angles = total_angle_rad * t_vert
+
+    # Map straight axis → arc:
+    # new position along perp1 = bend_radius * sin(theta) - bend_radius  (offset so start is at 0)
+    # new position along axis_idx = bend_radius * (1 - cos(theta)) ... hmm, let me think clearly.
+    #
+    # Classic bend: a straight rod along X of length L is bent into an arc.
+    # A point at x=d maps to polar angle θ = d/R.
+    # In the new frame: arc_x = R * sin(θ), arc_y = R * (1 - cos(θ))
+    # For the vertex, we replace its X with arc_x and add arc_y to its Y.
+    # Here we generalise to arbitrary axis.
+
+    arc_along = bend_radius * np.sin(vert_angles)   # new coord along axis_idx
+    arc_radial = bend_radius * (1.0 - np.cos(vert_angles))  # displacement along perp1
+
+    new_verts = verts.copy()
+    new_verts[:, axis_idx] = arc_along
+    new_verts[:, perp1] = verts[:, perp1] + arc_radial
+
+    # Rotate normals by the per-face bend angle
+    face_coords = (coords[0::3] + coords[1::3] + coords[2::3]) / 3.0
+    t_face = (face_coords - coord_min) / coord_range
+    face_angles = total_angle_rad * t_face
+    c_f = np.cos(face_angles)
+    s_f = np.sin(face_angles)
+
+    new_norms = norms.copy()
+    n_along = norms[:, axis_idx].copy()
+    n_radial = norms[:, perp1].copy()
+    new_norms[:, axis_idx] = n_along * c_f - n_radial * s_f
+    new_norms[:, perp1] = n_along * s_f + n_radial * c_f
+
+    mesh.vertices = new_verts.astype(np.float32)
+    mesh.normals = new_norms.astype(np.float32)
+    mesh.bounding_box = _compute_bounding_box(mesh.vertices)
+    write_stl_mesh(mesh, output_path, "binary")
+    return output_path
+
+
 def _build_mesh_from_quads(
     vertices: list[list[float]], normals: list[list[float]]
 ) -> MeshData:

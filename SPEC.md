@@ -330,6 +330,95 @@ An MCP server that provides tools for parsing, viewing, and editing STL (Stereol
     - Raises: `ValueError` if `bore_radius >= housing_radius` or
       `outlet_radius >= housing_radius`
 
+29. **`create_arch(output_path: str, inner_radius: float = 1.0, outer_radius: float = 1.3, depth: float = 0.5, segments: int = 32, arch_angle: float = 180.0) -> str`**
+    - Creates an architectural arch mesh (extruded circular ring segment).
+    - The arch sweeps from 0° to `arch_angle` in the XY plane; extruded along ±Z by `depth`/2.
+    - A 180° arch is a classic Roman semicircular arch; `arch_angle=360` yields a full ring.
+    - Essential for bridges, aqueducts, vaults, and doorways.
+    - Args:
+      - `output_path`: Output STL file path
+      - `inner_radius`: Inner (soffit) radius (default 1.0)
+      - `outer_radius`: Outer (extrados) radius (default 1.3)
+      - `depth`: Extrusion depth along Z (default 0.5)
+      - `segments`: Number of arc subdivisions (default 32)
+      - `arch_angle`: Total arc sweep in degrees; 180 = semicircle (default 180.0)
+    - Returns: Path to the output file
+    - Raises: `ValueError` if `inner_radius >= outer_radius` or `arch_angle` not in (0, 360]
+
+30. **`create_bolt(output_path: str, shaft_radius: float = 0.2, head_radius: float = 0.4, shaft_length: float = 2.0, head_height: float = 0.35, thread_pitch: float = 0.2, thread_depth: float = 0.04, segments: int = 6, thread_segments: int = 32) -> str`**
+    - Creates a hex bolt mesh with a threaded shaft.
+    - The bolt axis is along Y.  Hex head at y=0…y=head_height; threaded shaft above.
+    - Thread profile is modelled as raised annular rings (visual approximation).
+    - Args:
+      - `output_path`: Output STL file path
+      - `shaft_radius`: Nominal shaft (minor thread) radius (default 0.2)
+      - `head_radius`: Circumscribed radius of the hexagonal head (default 0.4)
+      - `shaft_length`: Length of the threaded shaft (default 2.0)
+      - `head_height`: Height of the hex head along Y (default 0.35)
+      - `thread_pitch`: Axial distance between thread crests (default 0.2)
+      - `thread_depth`: Radial height of thread crests above shaft (default 0.04)
+      - `segments`: Sides of the hex head (default 6)
+      - `thread_segments`: Circumferential segments per thread ring (default 32)
+    - Returns: Path to the output file
+    - Raises: `ValueError` if `shaft_radius <= 0`, `head_radius <= shaft_radius`,
+      `shaft_length <= 0`, or `thread_pitch <= 0`
+
+31. **`create_nut(output_path: str, inner_radius: float = 0.2, outer_radius: float = 0.4, height: float = 0.35, segments: int = 6, chamfer: float = 0.03) -> str`**
+    - Creates a hex nut mesh (regular polygon prism with cylindrical bore along Y).
+    - Args:
+      - `output_path`: Output STL file path
+      - `inner_radius`: Bore radius (default 0.2)
+      - `outer_radius`: Circumscribed radius of the hex body (default 0.4)
+      - `height`: Nut height along Y (default 0.35)
+      - `segments`: Sides of the outer polygon (default 6 → hex nut)
+      - `chamfer`: Chamfer bevel size on bore edges (default 0.03; 0 disables)
+    - Returns: Path to the output file
+    - Raises: `ValueError` if `inner_radius >= outer_radius` or `height <= 0`
+
+32. **`create_rack(output_path: str, length: float = 5.0, height: float = 0.5, thickness: float = 0.3, module: float = 0.5, pressure_angle_deg: float = 20.0) -> str`**
+    - Creates a linear gear rack mesh aligned along the X axis with teeth on the top face.
+    - Meshes with a spur gear to convert rotary motion to linear motion (rack-and-pinion).
+    - Args:
+      - `output_path`: Output STL file path
+      - `length`: Total rack length along X (default 5.0)
+      - `height`: Body height (excluding teeth) along Y (default 0.5)
+      - `thickness`: Body depth along Z (default 0.3)
+      - `module`: Gear module; tooth pitch = π × module (default 0.5)
+      - `pressure_angle_deg`: Tooth flank pressure angle in degrees (default 20.0)
+    - Returns: Path to the output file
+    - Raises: `ValueError` if `length`, `height`, `thickness`, or `module` <= 0
+
+33. **`create_i_beam(output_path: str, width: float = 0.5, height: float = 1.0, length: float = 5.0, flange_thickness: float = 0.06, web_thickness: float = 0.04) -> str`**
+    - Creates an I-beam (H-beam) structural steel section extruded along the Y axis.
+    - Cross-section: two horizontal flanges (along X) connected by a vertical web (along Z).
+    - The primary structural element of modern buildings, bridges, and industrial frames.
+    - Args:
+      - `output_path`: Output STL file path
+      - `width`: Total flange width along X (default 0.5)
+      - `height`: Total section height along Z (default 1.0)
+      - `length`: Beam length along Y (default 5.0)
+      - `flange_thickness`: Thickness of each flange plate along Z (default 0.06)
+      - `web_thickness`: Thickness of the web plate along X (default 0.04)
+    - Returns: Path to the output file
+    - Raises: `ValueError` if `height <= 2*flange_thickness`, `width <= web_thickness`,
+      or `length <= 0`
+
+34. **`bend_stl(path: str, output_path: str, angle: float, bend_radius: float = 1.0, axis: str = "z") -> str`**
+    - Bends a mesh along a circular arc about the specified axis.
+    - The straight extent along `axis` is mapped onto an arc of `bend_radius`; a vertex
+      at the minimum extent stays at angle 0, a vertex at the maximum extent is swept
+      by `angle` degrees.
+    - Normals are rotated by the same per-vertex angle to remain geometrically correct.
+    - Args:
+      - `path`: Input STL file path
+      - `output_path`: Output STL file path
+      - `angle`: Total bending angle in degrees
+      - `bend_radius`: Radius of the neutral bending axis (default 1.0)
+      - `axis`: Axis along which the mesh is swept ('x', 'y', or 'z'; default 'z')
+    - Returns: Path to the output file
+    - Raises: `FileNotFoundError` if input file missing; `ValueError` if axis invalid
+      or `bend_radius <= 0`
+
 
 
 1. **`stl://{filepath}`**
